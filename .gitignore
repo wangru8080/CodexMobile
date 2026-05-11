@@ -8,6 +8,7 @@ coverage/
 
 # Local runtime state, uploads, generated files, pairing tokens, logs
 .codexmobile/
+run_server.sh
 .tmp*
 .tmp*/
 _tmp*
