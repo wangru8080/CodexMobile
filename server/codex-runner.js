@@ -6,11 +6,6 @@ import { detectFeishuSkillKeys } from './feishu-skills.js';
 
 const activeRuns = new Map();
 const NON_ASCII_PATH_PATTERN = /[^\u0000-\u007F]/;
-const CODEXMOBILE_REPLY_INSTRUCTION = [
-  'CodexMobile iOS/PWA 回复要求：最终回复必须简短、直接。',
-  '除非用户明确要求，最终只写结果、关键链接、必要下一步；不要复述内部过程、命令日志或长篇验证细节。'
-].join('\n');
-
 async function ensureAsciiWorkingDirectory(projectPath) {
   if (process.platform !== 'win32' || !NON_ASCII_PATH_PATTERN.test(projectPath)) {
     return projectPath;
@@ -288,7 +283,27 @@ function emitCodexEvent(event, sessionId, turnId, emit, state) {
   const status = eventStatus(event, item);
   const messageId = item.id || `${turnId}-${kind}`;
 
-  if (kind === 'agent_message' || item.phase === 'commentary') {
+  if (kind === 'agent_message') {
+    const content = contentFromItem(item);
+    if (content.trim()) {
+      state.hadAssistantText = true;
+      emitStatus(emit, { sessionId, turnId, kind: 'message', status: 'running', label: '正在回复' });
+      emit({
+        type: 'assistant-update',
+        sessionId,
+        turnId,
+        messageId,
+        role: 'assistant',
+        kind: 'message',
+        phase: 'final_answer',
+        content,
+        done: done || status === 'completed'
+      });
+    }
+    return;
+  }
+
+  if (item.phase === 'commentary') {
     const content = contentFromItem(item);
     if (content.trim()) {
       emitStatus(emit, {
@@ -447,7 +462,7 @@ export async function runCodexTurn({ sessionId, draftSessionId, projectPath, mes
     });
     emitStatus(emit, { sessionId: currentSessionId, turnId, kind: 'reasoning', status: 'running', label: '正在思考' });
 
-    const codexInput = [message, CODEXMOBILE_REPLY_INSTRUCTION, larkCliContext.enabled ? larkCliContext.instruction : '']
+    const codexInput = [message, larkCliContext.enabled ? larkCliContext.instruction : '']
       .filter(Boolean)
       .join('\n\n');
     const streamedTurn = await thread.runStreamed(codexInput, { signal: abortController.signal });

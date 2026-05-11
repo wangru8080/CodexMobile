@@ -81,6 +81,7 @@ const REALTIME_VOICE_BUFFER_SIZE = 2048;
 const REALTIME_VOICE_MIN_TURN_MS = 500;
 const REALTIME_VOICE_BARGE_IN_LEVEL_THRESHOLD = 0.026;
 const REALTIME_VOICE_BARGE_IN_SUSTAIN_MS = 180;
+const EDIT_MESSAGE_TEXTAREA_MAX_HEIGHT = 180;
 
 function realtimePayloadErrorMessage(payload) {
   return String(payload?.error?.message || payload?.error || payload?.message || '');
@@ -764,8 +765,8 @@ function removeActivityMessagesForTurn(messages, payload) {
 }
 
 function upsertAssistantMessage(current, payload) {
-  const content = String(payload.content || '').trim();
-  if (!content) {
+  const content = String(payload.content || '');
+  if (!content.trim()) {
     return current;
   }
   const id = payload.messageId || `assistant-${payload.turnId || Date.now()}`;
@@ -1497,7 +1498,7 @@ function MessageContent({ content, onPreviewImage }) {
       rendered.push(<GeneratedImage key={`${part.url}-${index}`} part={part} onPreviewImage={onPreviewImage} />);
       return;
     }
-    rendered.push(...renderInlineText(part.value, `message-${index}`));
+    rendered.push(...renderMarkdownBlocks(part.value, `message-${index}`));
   });
 
   return (
@@ -1505,6 +1506,123 @@ function MessageContent({ content, onPreviewImage }) {
       {rendered}
     </div>
   );
+}
+
+function renderMarkdownBlocks(text, keyPrefix) {
+  const normalized = String(text || '').replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  const nodes = [];
+  let index = 0;
+  let paragraph = [];
+
+  function flushParagraph() {
+    if (!paragraph.length) {
+      return;
+    }
+    const value = paragraph.join('\n');
+    nodes.push(
+      <p key={`${keyPrefix}-p-${nodes.length}`}>
+        {renderInlineMarkdown(value, `${keyPrefix}-p-${nodes.length}`)}
+      </p>
+    );
+    paragraph = [];
+  }
+
+  while (index < lines.length) {
+    const line = lines[index];
+
+    if (/^\s*```/.test(line)) {
+      flushParagraph();
+      const language = line.replace(/^\s*```\s*/, '').trim();
+      const code = [];
+      index += 1;
+      while (index < lines.length && !/^\s*```/.test(lines[index])) {
+        code.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) {
+        index += 1;
+      }
+      nodes.push(
+        <pre key={`${keyPrefix}-code-${nodes.length}`} className={language ? `language-${language}` : undefined}>
+          <code>{code.join('\n')}</code>
+        </pre>
+      );
+      continue;
+    }
+
+    if (!line.trim()) {
+      flushParagraph();
+      index += 1;
+      continue;
+    }
+
+    const headingMatch = /^(#{1,6})\s+(.+)$/.exec(line);
+    if (headingMatch) {
+      flushParagraph();
+      const level = Math.min(headingMatch[1].length, 3);
+      const Tag = `h${level + 2}`;
+      nodes.push(
+        <Tag key={`${keyPrefix}-heading-${nodes.length}`}>
+          {renderInlineMarkdown(headingMatch[2].trim(), `${keyPrefix}-heading-${nodes.length}`)}
+        </Tag>
+      );
+      index += 1;
+      continue;
+    }
+
+    const listMatch = /^\s*(?:[-*+]\s+|\d+[.)]\s+)(.+)$/.exec(line);
+    if (listMatch) {
+      flushParagraph();
+      const ordered = /^\s*\d+[.)]\s+/.test(line);
+      const items = [];
+      while (index < lines.length) {
+        const itemMatch = /^\s*(?:[-*+]\s+|\d+[.)]\s+)(.+)$/.exec(lines[index]);
+        if (!itemMatch || /^\s*\d+[.)]\s+/.test(lines[index]) !== ordered) {
+          break;
+        }
+        items.push(itemMatch[1]);
+        index += 1;
+      }
+      const ListTag = ordered ? 'ol' : 'ul';
+      nodes.push(
+        <ListTag key={`${keyPrefix}-list-${nodes.length}`}>
+          {items.map((item, itemIndex) => (
+            <li key={`${keyPrefix}-li-${nodes.length}-${itemIndex}`}>
+              {renderInlineMarkdown(item, `${keyPrefix}-li-${nodes.length}-${itemIndex}`)}
+            </li>
+          ))}
+        </ListTag>
+      );
+      continue;
+    }
+
+    const quoteMatch = /^>\s?(.*)$/.exec(line);
+    if (quoteMatch) {
+      flushParagraph();
+      const quoteLines = [];
+      while (index < lines.length) {
+        const currentQuote = /^>\s?(.*)$/.exec(lines[index]);
+        if (!currentQuote) {
+          break;
+        }
+        quoteLines.push(currentQuote[1]);
+        index += 1;
+      }
+      nodes.push(
+        <blockquote key={`${keyPrefix}-quote-${nodes.length}`}>
+          {renderMarkdownBlocks(quoteLines.join('\n'), `${keyPrefix}-quote-${nodes.length}`)}
+        </blockquote>
+      );
+      continue;
+    }
+
+    paragraph.push(line);
+    index += 1;
+  }
+
+  flushParagraph();
+  return nodes.length ? nodes : renderInlineText(normalized, `${keyPrefix}-text`);
 }
 
 function normalizeInlineHref(value) {
@@ -1557,8 +1675,113 @@ function renderInlineText(text, keyPrefix) {
   return nodes.length ? nodes : [<span key={`${keyPrefix}-text-0`}>{value}</span>];
 }
 
-function ChatMessage({ message, onPreviewImage, onDeleteMessage }) {
+function renderInlineMarkdown(text, keyPrefix) {
+  const value = String(text || '');
+  const pattern = /(\*\*|__)(.+?)\1|(`)(.+?)`|\[([^\]]+)\]\(((?:https?:\/\/|www\.)[^\s)]+)\)|((?:https?:\/\/|www\.)[^\s<>()]+)/gi;
+  const nodes = [];
+  let lastIndex = 0;
+  let match;
+  let partIndex = 0;
+
+  while ((match = pattern.exec(value))) {
+    if (match.index > lastIndex) {
+      nodes.push(<span key={`${keyPrefix}-text-${partIndex++}`}>{value.slice(lastIndex, match.index)}</span>);
+    }
+
+    if (match[1]) {
+      nodes.push(<strong key={`${keyPrefix}-strong-${partIndex++}`}>{match[2]}</strong>);
+    } else if (match[3]) {
+      nodes.push(<code key={`${keyPrefix}-code-${partIndex++}`}>{match[4]}</code>);
+    } else if (match[5] && match[6]) {
+      const href = normalizeInlineHref(match[6]);
+      nodes.push(
+        <a key={`${keyPrefix}-link-${partIndex++}`} href={href} target="_blank" rel="noreferrer noopener">
+          {match[5]}
+        </a>
+      );
+    } else if (match[7]) {
+      const href = normalizeInlineHref(match[7]);
+      nodes.push(
+        <a key={`${keyPrefix}-link-${partIndex++}`} href={href} target="_blank" rel="noreferrer noopener">
+          {match[7]}
+        </a>
+      );
+    }
+
+    lastIndex = pattern.lastIndex;
+  }
+
+  if (lastIndex < value.length) {
+    nodes.push(<span key={`${keyPrefix}-text-${partIndex++}`}>{value.slice(lastIndex)}</span>);
+  }
+
+  return nodes.length ? nodes : [<span key={`${keyPrefix}-text-0`}>{value}</span>];
+}
+
+function MessageEditForm({ message, onCancel, onSubmit }) {
+  const [draft, setDraft] = useState(String(message.content || ''));
+  const textareaRef = useRef(null);
+  const value = draft.trim();
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  }, []);
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+    textarea.style.height = '0px';
+    textarea.style.height = `${Math.min(textarea.scrollHeight, EDIT_MESSAGE_TEXTAREA_MAX_HEIGHT)}px`;
+  }, [draft]);
+
+  function submit(event) {
+    event.preventDefault();
+    if (!value) {
+      return;
+    }
+    onSubmit?.(message, value);
+  }
+
+  return (
+    <form className="message-edit-form" onSubmit={submit}>
+      <textarea
+        ref={textareaRef}
+        rows={2}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            onCancel?.();
+          }
+          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+            submit(event);
+          }
+        }}
+        placeholder="编辑你的输入"
+      />
+      <div className="message-edit-actions">
+        <button type="button" className="message-edit-button" onClick={onCancel}>
+          取消
+        </button>
+        <button type="submit" className="message-edit-button is-primary" disabled={!value}>
+          发送
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function ChatMessage({ message, onPreviewImage, onDeleteMessage, onEditMessage }) {
   const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
   const copiedTimerRef = useRef(null);
 
   useEffect(() => () => {
@@ -1572,6 +1795,7 @@ function ChatMessage({ message, onPreviewImage, onDeleteMessage }) {
   }
   const isUser = message.role === 'user';
   const canAct = message.role === 'user' || message.role === 'assistant';
+  const canEdit = message.role === 'user';
 
   async function handleCopy() {
     const copiedText = await copyTextToClipboard(message.content);
@@ -1590,15 +1814,32 @@ function ChatMessage({ message, onPreviewImage, onDeleteMessage }) {
     <div className={`message-row ${isUser ? 'is-user' : ''}`}>
       <div className="message-stack">
         <div className="message-bubble">
-          <MessageContent content={message.content} onPreviewImage={onPreviewImage} />
+          {editing ? (
+            <MessageEditForm
+              message={message}
+              onCancel={() => setEditing(false)}
+              onSubmit={(editedMessage, nextContent) => {
+                setEditing(false);
+                onEditMessage?.(editedMessage, nextContent);
+              }}
+            />
+          ) : (
+            <MessageContent content={message.content} onPreviewImage={onPreviewImage} />
+          )}
           {message.timestamp ? <time>{formatTime(message.timestamp)}</time> : null}
         </div>
-        {canAct ? (
+        {canAct && !editing ? (
           <div className="message-actions" aria-label="消息操作">
             <button type="button" className="message-action" onClick={handleCopy}>
               {copied ? <Check size={13} /> : <Copy size={13} />}
               <span>{copied ? '已复制' : '复制'}</span>
             </button>
+            {canEdit ? (
+              <button type="button" className="message-action" onClick={() => setEditing(true)}>
+                <Pencil size={13} />
+                <span>修改</span>
+              </button>
+            ) : null}
             <button type="button" className="message-action is-delete" onClick={() => onDeleteMessage?.(message)}>
               <Trash2 size={13} />
               <span>删除</span>
@@ -1610,7 +1851,7 @@ function ChatMessage({ message, onPreviewImage, onDeleteMessage }) {
   );
 }
 
-function ChatPane({ messages, selectedSession, running, onPreviewImage, onDeleteMessage }) {
+function ChatPane({ messages, selectedSession, running, onPreviewImage, onDeleteMessage, onEditMessage }) {
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -1637,6 +1878,7 @@ function ChatPane({ messages, selectedSession, running, onPreviewImage, onDelete
           message={message}
           onPreviewImage={onPreviewImage}
           onDeleteMessage={onDeleteMessage}
+          onEditMessage={onEditMessage}
         />
       ))}
       <div ref={bottomRef} />
@@ -3218,8 +3460,84 @@ export default function App() {
     });
   }
 
+  function restoreTurnSnapshot(turn) {
+    const currentSession = selectedSessionRef.current;
+    if (!turn?.turnId || !currentSession || !payloadMatchesCurrentConversation(turn)) {
+      return;
+    }
+
+    const sessionId = turn.sessionId || turn.previousSessionId || currentSession.id || null;
+    const projectId = turn.projectId || selectedProjectRef.current?.id || currentSession.projectId || null;
+    const content = String(turn.assistantPreview || '');
+
+    if (content.trim()) {
+      setMessages((current) =>
+        upsertAssistantMessage(current, {
+          sessionId,
+          previousSessionId: turn.previousSessionId,
+          turnId: turn.turnId,
+          messageId: turn.messageId || `assistant-${turn.turnId}`,
+          kind: 'message',
+          content
+        })
+      );
+    } else if (turn.status === 'running' || turn.status === 'queued') {
+      setMessages((current) =>
+        upsertStatusMessage(current, {
+          sessionId,
+          previousSessionId: turn.previousSessionId,
+          turnId: turn.turnId,
+          kind: turn.kind || 'reasoning',
+          status: turn.status || 'running',
+          label: turn.label || '正在思考中',
+          detail: turn.detail || ''
+        })
+      );
+    }
+
+    if (turn.status === 'running' || turn.status === 'queued') {
+      pollTurnUntilComplete({
+        turnId: turn.turnId,
+        optimisticSessionId: turn.previousSessionId || sessionId,
+        projectId,
+        previousSessionId: turn.previousSessionId
+      });
+      return;
+    }
+
+    if (turn.status === 'completed' && sessionId) {
+      scheduleTurnRefresh({
+        sessionId,
+        previousSessionId: turn.previousSessionId,
+        turnId: turn.turnId,
+        hadAssistantText: turn.hadAssistantText || Boolean(content.trim()),
+        usage: turn.usage || null
+      });
+    }
+  }
+
   function syncActiveRunsFromStatus(nextStatus) {
     const activeRuns = Array.isArray(nextStatus?.activeRuns) ? nextStatus.activeRuns : [];
+    const recentTurns = Array.isArray(nextStatus?.recentTurns) ? nextStatus.recentTurns : [];
+    const recoverableTurns = new Map();
+    const currentSession = selectedSessionRef.current;
+    const matchingRecentTurns = currentSession
+      ? recentTurns.filter((turn) => turn?.turnId && payloadMatchesCurrentConversation(turn))
+      : [];
+    const latestMatchingTurn = matchingRecentTurns[0] || null;
+
+    for (const turn of activeRuns) {
+      if (turn?.turnId && payloadMatchesCurrentConversation(turn)) {
+        recoverableTurns.set(turn.turnId, turn);
+      }
+    }
+    if (latestMatchingTurn) {
+      recoverableTurns.set(latestMatchingTurn.turnId, latestMatchingTurn);
+    }
+
+    for (const turn of recoverableTurns.values()) {
+      restoreTurnSnapshot(turn);
+    }
 
     if (!activeRuns.length) {
       setMessages((current) => {
@@ -3637,17 +3955,6 @@ export default function App() {
           );
           return;
         }
-        if (!payload.done) {
-          setMessages((current) =>
-            upsertStatusMessage(current, {
-              ...payload,
-              kind: payload.kind || 'message',
-              label: '正在整理回复',
-              status: payload.status || 'running'
-            })
-          );
-          return;
-        }
         setMessages((current) => upsertAssistantMessage(current, payload));
         return;
       }
@@ -3916,6 +4223,55 @@ export default function App() {
         return next;
       });
       window.alert(`删除失败：${error.message}`);
+    }
+  }
+
+  async function hideMessagesForEdit(sessionId, messagesToHide) {
+    if (!sessionId || isDraftSession({ id: sessionId })) {
+      return;
+    }
+    const ids = messagesToHide.map((item) => item.id).filter(Boolean);
+    await Promise.all(
+      ids.map((messageId) =>
+        apiFetch(
+          `/api/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(String(messageId))}`,
+          { method: 'DELETE' }
+        )
+      )
+    );
+  }
+
+  async function handleEditMessage(message, nextContent) {
+    const value = String(nextContent || '').trim();
+    if (!message?.id || !value || value === String(message.content || '').trim()) {
+      return;
+    }
+
+    const messageId = String(message.id);
+    const sessionId = selectedSessionRef.current?.id || message.sessionId || '';
+    const existingIndex = messages.findIndex((item) => String(item.id) === messageId);
+    const editIndex = existingIndex >= 0 ? existingIndex : messages.length;
+    const replacedMessages = existingIndex >= 0 ? messages.slice(editIndex) : [message];
+
+    setMessages((current) => current.slice(0, Math.max(0, editIndex)));
+
+    try {
+      await hideMessagesForEdit(sessionId, replacedMessages);
+      await submitCodexMessage({
+        message: value,
+        attachmentsForTurn: [],
+        clearComposer: false
+      });
+    } catch (error) {
+      setMessages((current) => {
+        const withoutRestored = current.filter(
+          (item) => !replacedMessages.some((restored) => String(restored.id) === String(item.id))
+        );
+        const next = [...withoutRestored];
+        next.splice(Math.min(editIndex, next.length), 0, ...replacedMessages);
+        return next;
+      });
+      window.alert(`修改失败：${error.message}`);
     }
   }
 
@@ -4592,6 +4948,7 @@ export default function App() {
         running={running}
         onPreviewImage={setPreviewImage}
         onDeleteMessage={handleDeleteMessage}
+        onEditMessage={handleEditMessage}
       />
       <VoiceDialogPanel
         open={voiceDialogOpen}

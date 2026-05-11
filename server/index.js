@@ -182,6 +182,19 @@ function getActiveImageRuns() {
   }));
 }
 
+function recentTurnSnapshots(limit = 24) {
+  return [...recentTurns.values()]
+    .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))
+    .slice(0, limit);
+}
+
+function activeRunsWithSnapshots() {
+  return [...getActiveRuns(), ...getActiveImageRuns()].map((run) => ({
+    ...recentTurns.get(run.turnId),
+    ...run
+  }));
+}
+
 function payloadReferencesSession(payload, sessionId) {
   return [
     payload?.sessionId,
@@ -800,7 +813,8 @@ async function publicStatus(authenticated) {
     voiceRealtime: publicVoiceRealtimeStatus(config),
     docs: await publicDocsStatus(authenticated),
     syncedAt: snapshot.syncedAt,
-    activeRuns: [...getActiveRuns(), ...getActiveImageRuns()],
+    activeRuns: activeRunsWithSnapshots(),
+    recentTurns: recentTurnSnapshots(),
     auth: {
       required: true,
       authenticated,

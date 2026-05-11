@@ -1390,6 +1390,91 @@ button {
   color: var(--danger);
 }
 
+.message-edit-form {
+  display: grid;
+  gap: 8px;
+  width: min(100%, 520px);
+  min-width: min(62vw, 320px);
+}
+
+.message-edit-form textarea {
+  display: block;
+  width: 100%;
+  min-height: 86px;
+  max-height: 180px;
+  padding: 10px 11px;
+  resize: none;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 12px;
+  outline: 0;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+  line-height: 1.45;
+  font-size: 14px;
+}
+
+.message-edit-form textarea::placeholder {
+  color: rgba(255, 255, 255, 0.66);
+}
+
+.message-edit-form textarea:focus {
+  border-color: rgba(255, 255, 255, 0.46);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.12);
+}
+
+.message-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.message-edit-button {
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  color: #e5e7eb;
+  background: rgba(255, 255, 255, 0.13);
+}
+
+.message-edit-button.is-primary {
+  color: #1f2937;
+  background: #fff;
+}
+
+.message-edit-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.message-edit-button:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+.message-bubble:not(.activity-bubble) .message-edit-form textarea {
+  color: inherit;
+}
+
+.message-row:not(.is-user) .message-edit-form textarea {
+  border-color: rgba(148, 163, 184, 0.34);
+  color: var(--text);
+  background: rgba(15, 23, 42, 0.04);
+}
+
+.message-row:not(.is-user) .message-edit-form textarea::placeholder {
+  color: var(--muted);
+}
+
+.message-row:not(.is-user) .message-edit-button {
+  color: #4b5563;
+  background: #eef0ed;
+}
+
+.message-row:not(.is-user) .message-edit-button.is-primary {
+  color: #fff;
+  background: var(--accent);
+}
+
 @media (hover: hover) {
   .message-actions {
     opacity: 0.66;
@@ -1496,11 +1581,60 @@ button {
 
 .message-content {
   max-width: 100%;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
   font-size: 14px;
   line-height: 1.55;
+}
+
+.message-content p,
+.message-content ul,
+.message-content ol,
+.message-content blockquote,
+.message-content pre,
+.message-content h3,
+.message-content h4,
+.message-content h5 {
+  margin: 0 0 0.65em;
+}
+
+.message-content > :last-child {
+  margin-bottom: 0;
+}
+
+.message-content p {
+  white-space: pre-wrap;
+}
+
+.message-content h3,
+.message-content h4,
+.message-content h5 {
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.message-content h3 {
+  font-size: 1.08em;
+}
+
+.message-content h4,
+.message-content h5 {
+  font-size: 1em;
+}
+
+.message-content ul,
+.message-content ol {
+  padding-left: 1.35em;
+}
+
+.message-content li + li {
+  margin-top: 0.22em;
+}
+
+.message-content blockquote {
+  padding: 0.05em 0 0.05em 0.8em;
+  border-left: 3px solid rgba(148, 163, 184, 0.55);
+  color: var(--muted);
 }
 
 .message-content a {
@@ -1525,9 +1659,41 @@ button {
 .message-content pre,
 .message-content code {
   max-width: 100%;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.message-content code {
+  padding: 0.08em 0.32em;
+  border-radius: 5px;
+  background: rgba(15, 23, 42, 0.08);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+
+.message-content pre {
+  overflow-x: auto;
+  padding: 10px;
+  border-radius: 10px;
+  background: #f1f3f5;
+  white-space: pre;
+}
+
+.message-content pre code {
+  display: block;
+  padding: 0;
+  background: transparent;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.message-row.is-user .message-content code {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.message-row.is-user .message-content pre {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .message-image-link {

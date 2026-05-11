@@ -264,7 +264,6 @@ function isVisibleUserMessage(payload) {
 }
 
 const INTERNAL_PROMPT_MARKERS = [
-  'CodexMobile iOS/PWA 回复要求：',
   'CodexMobile 已接入飞书官方 lark-cli。',
   'CodexMobile 已接入飞书官方 lark-cli'
 ];
