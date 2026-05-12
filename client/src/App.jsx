@@ -1803,7 +1803,7 @@ function MessageEditForm({ message, onCancel, onSubmit }) {
   );
 }
 
-function ChatMessage({ message, onPreviewImage, onDeleteMessage, onEditMessage }) {
+function ChatMessage({ message, onPreviewImage, onDeleteMessage, onEditMessage, onRegenerateMessage }) {
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const copiedTimerRef = useRef(null);
@@ -1820,6 +1820,7 @@ function ChatMessage({ message, onPreviewImage, onDeleteMessage, onEditMessage }
   const isUser = message.role === 'user';
   const canAct = message.role === 'user' || message.role === 'assistant';
   const canEdit = message.role === 'user';
+  const canRegenerate = message.role === 'assistant';
 
   async function handleCopy() {
     const copiedText = await copyTextToClipboard(message.content);
@@ -1868,6 +1869,12 @@ function ChatMessage({ message, onPreviewImage, onDeleteMessage, onEditMessage }
               <Trash2 size={13} />
               <span>删除</span>
             </button>
+            {canRegenerate ? (
+              <button type="button" className="message-action" onClick={() => onRegenerateMessage?.(message)}>
+                <RefreshCw size={13} />
+                <span>重新生成</span>
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -1875,7 +1882,7 @@ function ChatMessage({ message, onPreviewImage, onDeleteMessage, onEditMessage }
   );
 }
 
-function ChatPane({ messages, selectedSession, running, onPreviewImage, onDeleteMessage, onEditMessage }) {
+function ChatPane({ messages, selectedSession, running, onPreviewImage, onDeleteMessage, onEditMessage, onRegenerateMessage }) {
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -1903,6 +1910,7 @@ function ChatPane({ messages, selectedSession, running, onPreviewImage, onDelete
           onPreviewImage={onPreviewImage}
           onDeleteMessage={onDeleteMessage}
           onEditMessage={onEditMessage}
+          onRegenerateMessage={onRegenerateMessage}
         />
       ))}
       <div ref={bottomRef} />
@@ -4395,9 +4403,9 @@ export default function App() {
     );
   }
 
-  async function handleEditMessage(message, nextContent) {
+  async function handleEditMessage(message, nextContent, { force = false } = {}) {
     const value = String(nextContent || '').trim();
-    if (!message?.id || !value || value === String(message.content || '').trim()) {
+    if (!message?.id || !value || (!force && value === String(message.content || '').trim())) {
       return;
     }
 
@@ -4444,6 +4452,29 @@ export default function App() {
       });
       window.alert(`修改失败：${error.message}`);
     }
+  }
+
+  async function handleRegenerateMessage(message) {
+    if (running) {
+      window.alert('当前任务正在运行，请稍后再重新生成。');
+      return;
+    }
+    const assistantIndex = messages.findIndex((item) => String(item.id) === String(message?.id));
+    if (assistantIndex < 0) {
+      return;
+    }
+    let userMessage = null;
+    for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+      if (messages[index].role === 'user' && String(messages[index].content || '').trim()) {
+        userMessage = messages[index];
+        break;
+      }
+    }
+    if (!userMessage) {
+      window.alert('没有找到可重新生成的用户输入。');
+      return;
+    }
+    await handleEditMessage(userMessage, userMessage.content, { force: true });
   }
 
   function handleNewConversation() {
@@ -5139,6 +5170,7 @@ export default function App() {
         onPreviewImage={setPreviewImage}
         onDeleteMessage={handleDeleteMessage}
         onEditMessage={handleEditMessage}
+        onRegenerateMessage={handleRegenerateMessage}
       />
       <VoiceDialogPanel
         open={voiceDialogOpen}
