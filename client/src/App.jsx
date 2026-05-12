@@ -2608,6 +2608,24 @@ export default function App() {
     }
     return next;
   }
+
+  function codexContextBeforeMessage(messageId) {
+    const targetId = String(messageId || '');
+    if (!targetId) {
+      return [];
+    }
+    const targetIndex = messages.findIndex((item) => String(item.id) === targetId);
+    if (targetIndex <= 0) {
+      return [];
+    }
+    return messages
+      .slice(0, targetIndex)
+      .filter((item) => (item.role === 'user' || item.role === 'assistant') && String(item.content || '').trim())
+      .map((item) => ({
+        role: item.role,
+        content: String(item.content || '').trim()
+      }));
+  }
   const [voiceDialogOpen, setVoiceDialogOpen] = useState(false);
   const [voiceDialogState, setVoiceDialogState] = useState('idle');
   const [voiceDialogError, setVoiceDialogError] = useState('');
@@ -4436,7 +4454,8 @@ export default function App() {
         message: value,
         attachmentsForTurn: [],
         clearComposer: false,
-        userMessageId: messageId
+        userMessageId: messageId,
+        contextMessages: codexContextBeforeMessage(messageId)
       });
     } catch (error) {
       forgetEditedMessages(sessionId, editedState.keys, editedState.replacementId);
@@ -4682,7 +4701,8 @@ export default function App() {
     attachmentsForTurn = [],
     clearComposer = false,
     restoreTextOnError = false,
-    userMessageId = ''
+    userMessageId = '',
+    contextMessages = null
   }) {
     const project = selectedProject || selectedProjectRef.current;
     const selectedAttachments = Array.isArray(attachmentsForTurn) ? attachmentsForTurn : [];
@@ -4781,7 +4801,8 @@ export default function App() {
           permissionMode,
           model: selectedModel || status.model,
           reasoningEffort: selectedReasoningEffort || status.reasoningEffort || DEFAULT_REASONING_EFFORT,
-          attachments: selectedAttachments
+          attachments: selectedAttachments,
+          contextMessages
         }
       });
       pollTurnUntilComplete({

@@ -49,6 +49,30 @@ function normalizeReasoningEffort(reasoningEffort) {
   return ['minimal', 'low', 'medium', 'high', 'xhigh'].includes(value) ? value : undefined;
 }
 
+function normalizeContextMessages(contextMessages) {
+  if (!Array.isArray(contextMessages)) {
+    return [];
+  }
+  return contextMessages
+    .map((message) => ({
+      role: message?.role === 'assistant' ? 'assistant' : 'user',
+      content: String(message?.content || '').trim()
+    }))
+    .filter((message) => message.content)
+    .slice(-40);
+}
+
+function formatContextMessages(contextMessages) {
+  const messages = normalizeContextMessages(contextMessages);
+  if (!messages.length) {
+    return '';
+  }
+  return [
+    '重要：用户正在修改或重新生成较早的一轮回答。以下是当前问题之前仍然有效的对话上下文。当前问题之后曾经出现过的旧用户问题、旧回答和旧操作都已经作废；即使底层会话历史里仍可见，也必须完全忽略，不得参考、延续、总结或使用。请只基于以下有效上下文和最后的新用户问题继续回答。',
+    ...messages.map((item) => `${item.role === 'assistant' ? 'Assistant' : 'User'}: ${item.content}`)
+  ].join('\n\n');
+}
+
 function textFromContent(content) {
   if (typeof content === 'string') {
     return content;
@@ -401,7 +425,7 @@ function emitCodexEvent(event, sessionId, turnId, emit, state) {
   }
 }
 
-export async function runCodexTurn({ sessionId, draftSessionId, projectPath, message, model, reasoningEffort, permissionMode, turnId: providedTurnId }, emit) {
+export async function runCodexTurn({ sessionId, draftSessionId, projectPath, message, model, reasoningEffort, permissionMode, turnId: providedTurnId, contextMessages }, emit) {
   const { Codex } = await import('@openai/codex-sdk');
   const workingDirectory = await ensureAsciiWorkingDirectory(projectPath);
   const { sandboxMode, approvalPolicy } = mapPermissionMode(permissionMode);
@@ -446,6 +470,7 @@ export async function runCodexTurn({ sessionId, draftSessionId, projectPath, mes
       ...(larkCliContext.enabled ? { networkAccessEnabled: true } : {})
     };
 
+    const contextText = formatContextMessages(contextMessages);
     thread = sessionId ? codex.resumeThread(sessionId, threadOptions) : codex.startThread(threadOptions);
     currentSessionId = thread.id || sessionId || `codex-${Date.now()}`;
     run.thread = thread;
@@ -462,7 +487,7 @@ export async function runCodexTurn({ sessionId, draftSessionId, projectPath, mes
     });
     emitStatus(emit, { sessionId: currentSessionId, turnId, kind: 'reasoning', status: 'running', label: '正在思考' });
 
-    const codexInput = [message, larkCliContext.enabled ? larkCliContext.instruction : '']
+    const codexInput = [contextText, message, larkCliContext.enabled ? larkCliContext.instruction : '']
       .filter(Boolean)
       .join('\n\n');
     const streamedTurn = await thread.runStreamed(codexInput, { signal: abortController.signal });

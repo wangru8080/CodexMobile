@@ -772,6 +772,19 @@ function remoteAddress(req) {
   return req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || '';
 }
 
+function normalizeContextMessages(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((message) => ({
+      role: message?.role === 'assistant' ? 'assistant' : 'user',
+      content: String(message?.content || '').trim()
+    }))
+    .filter((message) => message.content)
+    .slice(-40);
+}
+
 async function isAuthenticated(req) {
   return verifyToken(extractBearerToken(req), { remoteAddress: remoteAddress(req) });
 }
@@ -914,7 +927,8 @@ function runNextQueuedChat(queueKey) {
       model: job.model,
       reasoningEffort: job.reasoningEffort,
       permissionMode: job.permissionMode,
-      turnId: job.turnId
+      turnId: job.turnId,
+      contextMessages: job.contextMessages
     },
     (payload) => {
       if (payload.sessionId) {
@@ -1273,6 +1287,7 @@ async function handleApi(req, res, url) {
     const config = getCacheSnapshot().config || {};
     const displayMessage = message || '请查看附件。';
     const codexMessage = withAttachmentReferences(displayMessage, attachments);
+    const contextMessages = normalizeContextMessages(body.contextMessages);
     const imagePrompt = isImageRequest(displayMessage, attachments)
       ? displayMessage
       : resolveContinuationImagePrompt(project.id, displayMessage);
@@ -1404,6 +1419,7 @@ async function handleApi(req, res, url) {
       turnId,
       codexMessage,
       displayMessage,
+      contextMessages,
       model: session?.model || body.model || config.model || 'gpt-5.5',
       reasoningEffort: body.reasoningEffort || DEFAULT_REASONING_EFFORT,
       permissionMode: body.permissionMode || 'default'
