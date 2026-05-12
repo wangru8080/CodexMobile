@@ -764,6 +764,30 @@ function removeActivityMessagesForTurn(messages, payload) {
   });
 }
 
+function finishActivityMessagesForTurn(messages, payload, { status = 'completed', label = '已中止' } = {}) {
+  const keys = new Set(payloadRunKeys(payload));
+  if (!keys.size) {
+    return messages;
+  }
+  let changed = false;
+  const next = messages.map((message) => {
+    if (message.role !== 'activity' || !payloadRunKeys(message).some((key) => keys.has(key))) {
+      return message;
+    }
+    if (message.status !== 'running' && message.status !== 'queued') {
+      return message;
+    }
+    changed = true;
+    return {
+      ...message,
+      status,
+      label,
+      content: label
+    };
+  });
+  return changed ? next : messages;
+}
+
 function upsertAssistantMessage(current, payload) {
   const content = String(payload.content || '');
   if (!content.trim()) {
@@ -4134,7 +4158,7 @@ export default function App() {
           );
         } else if (payload.type === 'chat-aborted') {
           setMessages((current) =>
-            upsertStatusMessage(current, {
+            upsertStatusMessage(finishActivityMessagesForTurn(current, payload), {
               ...payload,
               status: 'completed',
               label: '已中止'
@@ -4992,7 +5016,9 @@ export default function App() {
       method: 'POST',
       body: { sessionId: abortId, turnId: selectedSessionRef.current?.turnId || null }
     }).catch(() => null);
-    clearRun({ sessionId: abortId, turnId: selectedSessionRef.current?.turnId || null });
+    const payload = { sessionId: abortId, turnId: selectedSessionRef.current?.turnId || null };
+    clearRun(payload);
+    setMessages((current) => finishActivityMessagesForTurn(current, payload));
   }
 
   async function handleConnectDocs() {
