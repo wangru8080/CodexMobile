@@ -1226,11 +1226,7 @@ function TopBar({ selectedProject, selectedSession, connectionState, onMenu, onO
       <div className="top-title">
         <strong>{selectedProject?.name || 'CodexMobile'}</strong>
         <span className={`connection-status ${status.className}`}>
-          <Wifi size={13} />
-          {status.label}
-        </span>
-        {sessionId ? (
-          <>
+          {sessionId ? (
             <button
               type="button"
               className={`session-info-button ${sessionInfoOpen ? 'is-active' : ''}`}
@@ -1240,6 +1236,12 @@ function TopBar({ selectedProject, selectedSession, connectionState, onMenu, onO
             >
               <Info size={13} />
             </button>
+          ) : null}
+          <Wifi size={13} />
+          {status.label}
+        </span>
+        {sessionId ? (
+          <>
             {sessionInfoOpen ? (
               <div className="session-info-popover" role="status">
                 <div>
