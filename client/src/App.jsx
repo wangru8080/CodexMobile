@@ -2414,6 +2414,8 @@ export default function App() {
   const lastLocalRunAtRef = useRef(0);
   const activePollsRef = useRef(new Set());
   const turnRefreshTimersRef = useRef(new Map());
+  const editedMessageFiltersRef = useRef(new Map());
+  const editedMessageReplacementsRef = useRef(new Map());
   const voiceDialogRecorderRef = useRef(null);
   const voiceDialogChunksRef = useRef([]);
   const voiceDialogStreamRef = useRef(null);
@@ -2449,6 +2451,131 @@ export default function App() {
   const voiceRealtimeSuppressAssistantAudioRef = useRef(false);
   const voiceDialogIdeaBufferRef = useRef([]);
   const voiceDialogHandoffDraftRef = useRef('');
+
+  function editedMessageKey(message) {
+    const role = String(message?.role || '').trim();
+    const content = String(message?.content || '').trim();
+    if (!role || !content) {
+      return '';
+    }
+    return `${role}:${content}`;
+  }
+
+  function rememberEditedMessages(sessionId, messagesToHide, replacementMessage = null) {
+    const id = String(sessionId || '').trim();
+    if (!id) {
+      return { keys: [], replacementId: '' };
+    }
+    const keys = messagesToHide.map(editedMessageKey).filter(Boolean);
+    if (!keys.length) {
+      return { keys: [], replacementId: '' };
+    }
+    const next = new Set(editedMessageFiltersRef.current.get(id) || []);
+    for (const key of keys) {
+      next.add(key);
+    }
+    editedMessageFiltersRef.current.set(id, next);
+    if (replacementMessage) {
+      const replacements = editedMessageReplacementsRef.current.get(id) || [];
+      const replacementId = String(replacementMessage.id || `edited-${Date.now()}`);
+      editedMessageReplacementsRef.current.set(id, [
+        ...replacements,
+        {
+          id: replacementId,
+          keys,
+          message: { ...replacementMessage, id: replacementId }
+        }
+      ]);
+      return { keys, replacementId };
+    }
+    return { keys, replacementId: '' };
+  }
+
+  function forgetEditedMessages(sessionId, keys, replacementId = '') {
+    const id = String(sessionId || '').trim();
+    if (!id || !keys.length) {
+      return;
+    }
+    const current = editedMessageFiltersRef.current.get(id);
+    if (!current) {
+      return;
+    }
+    for (const key of keys) {
+      current.delete(key);
+    }
+    if (current.size) {
+      editedMessageFiltersRef.current.set(id, current);
+    } else {
+      editedMessageFiltersRef.current.delete(id);
+    }
+    if (replacementId) {
+      const replacements = editedMessageReplacementsRef.current.get(id) || [];
+      const nextReplacements = replacements.filter((item) => item.id !== replacementId);
+      if (nextReplacements.length) {
+        editedMessageReplacementsRef.current.set(id, nextReplacements);
+      } else {
+        editedMessageReplacementsRef.current.delete(id);
+      }
+    }
+  }
+
+  function isEditedMessageHidden(sessionId, message) {
+    const id = String(sessionId || '').trim();
+    const key = editedMessageKey(message);
+    return Boolean(id && key && editedMessageFiltersRef.current.get(id)?.has(key));
+  }
+
+  function updateEditedReplacementTurn(sessionId, replacementId, patch) {
+    const id = String(sessionId || '').trim();
+    if (!id || !replacementId) {
+      return;
+    }
+    const replacements = editedMessageReplacementsRef.current.get(id) || [];
+    editedMessageReplacementsRef.current.set(
+      id,
+      replacements.map((item) =>
+        item.id === replacementId
+          ? { ...item, message: { ...item.message, ...patch } }
+          : item
+      )
+    );
+  }
+
+  function filterEditedMessages(sessionId, nextMessages) {
+    const messagesToFilter = Array.isArray(nextMessages) ? nextMessages : [];
+    const id = String(sessionId || '').trim();
+    const replacements = id ? editedMessageReplacementsRef.current.get(id) || [] : [];
+    if (!replacements.length) {
+      return messagesToFilter.filter((message) => !isEditedMessageHidden(sessionId, message));
+    }
+
+    const inserted = new Set();
+    const next = [];
+    for (const message of messagesToFilter) {
+      const key = editedMessageKey(message);
+      const replacement = replacements.find((item) => item.keys.includes(key));
+      if (replacement) {
+        if (!inserted.has(replacement.id)) {
+          next.push(replacement.message);
+          inserted.add(replacement.id);
+        }
+        continue;
+      }
+      if (!isEditedMessageHidden(sessionId, message)) {
+        next.push(message);
+      }
+    }
+    for (const replacement of replacements) {
+      const replacementContent = String(replacement.message?.content || '').trim();
+      const alreadyLoadedReplacement = next.some(
+        (message) => message.role === 'user' && String(message.content || '').trim() === replacementContent
+      );
+      if (!inserted.has(replacement.id) && !alreadyLoadedReplacement) {
+        next.push(replacement.message);
+      }
+    }
+    return next;
+  }
   const [voiceDialogOpen, setVoiceDialogOpen] = useState(false);
   const [voiceDialogState, setVoiceDialogState] = useState('idle');
   const [voiceDialogError, setVoiceDialogError] = useState('');
@@ -3596,7 +3723,7 @@ export default function App() {
     try {
       const data = await apiFetch(`/api/sessions/${encodeURIComponent(payload.sessionId)}/messages?limit=120`);
       if (data.messages?.length && hasVisibleAssistantForTurn(data.messages, payload)) {
-        setMessages(data.messages);
+        setMessages(filterEditedMessages(payload.sessionId, data.messages));
         return true;
       }
     } catch {
@@ -3785,7 +3912,7 @@ export default function App() {
         setSelectedSession(next);
         if (next) {
           const messageData = await apiFetch(`/api/sessions/${encodeURIComponent(next.id)}/messages?limit=120`);
-          setMessages(messageData.messages || []);
+          setMessages(filterEditedMessages(next.id, messageData.messages || []));
         } else {
           setMessages([]);
         }
@@ -3923,6 +4050,9 @@ export default function App() {
       }
       if (payload.type === 'user-message') {
         if (!payloadMatchesCurrentConversation(payload)) {
+          return;
+        }
+        if (isEditedMessageHidden(payload.sessionId, payload.message)) {
           return;
         }
         setMessages((current) => {
@@ -4081,7 +4211,7 @@ export default function App() {
       return;
     }
     const data = await apiFetch(`/api/sessions/${encodeURIComponent(session.id)}/messages?limit=120`);
-    setMessages(data.messages || []);
+    setMessages(filterEditedMessages(session.id, data.messages || []));
     setDrawerOpen(false);
   }
 
@@ -4253,19 +4383,36 @@ export default function App() {
     const editIndex = existingIndex >= 0 ? existingIndex : messages.length;
     const replacedMessages = existingIndex >= 0 ? messages.slice(editIndex) : [message];
 
-    setMessages((current) => current.slice(0, Math.max(0, editIndex)));
+    const editedMessage = {
+      ...(existingIndex >= 0 ? messages[existingIndex] : message),
+      id: messageId,
+      role: 'user',
+      content: value,
+      timestamp: new Date().toISOString(),
+      sessionId
+    };
+    const editedState = rememberEditedMessages(sessionId, replacedMessages, editedMessage);
+    setMessages((current) => {
+      const next = current.slice(0, Math.max(0, editIndex));
+      next.push(editedMessage);
+      return next;
+    });
 
     try {
       await hideMessagesForEdit(sessionId, replacedMessages);
       await submitCodexMessage({
         message: value,
         attachmentsForTurn: [],
-        clearComposer: false
+        clearComposer: false,
+        userMessageId: messageId
       });
     } catch (error) {
+      forgetEditedMessages(sessionId, editedState.keys, editedState.replacementId);
       setMessages((current) => {
         const withoutRestored = current.filter(
-          (item) => !replacedMessages.some((restored) => String(restored.id) === String(item.id))
+          (item) =>
+            String(item.id) !== messageId &&
+            !replacedMessages.some((restored) => String(restored.id) === String(item.id))
         );
         const next = [...withoutRestored];
         next.splice(Math.min(editIndex, next.length), 0, ...replacedMessages);
@@ -4393,7 +4540,7 @@ export default function App() {
     }
     const data = await apiFetch(`/api/sessions/${encodeURIComponent(realSessionId)}/messages?limit=120`);
     if (data.messages?.length && hasVisibleAssistantForTurn(data.messages, { turnId })) {
-      setMessages(data.messages);
+      setMessages(filterEditedMessages(realSessionId, data.messages));
       return true;
     }
     return false;
@@ -4479,7 +4626,8 @@ export default function App() {
     message,
     attachmentsForTurn = [],
     clearComposer = false,
-    restoreTextOnError = false
+    restoreTextOnError = false,
+    userMessageId = ''
   }) {
     const project = selectedProject || selectedProjectRef.current;
     const selectedAttachments = Array.isArray(attachmentsForTurn) ? attachmentsForTurn : [];
@@ -4526,29 +4674,45 @@ export default function App() {
         )
       }));
     }
-    setMessages((current) =>
-      upsertStatusMessage(
-        [
-          ...current,
-          {
-            id: `local-${Date.now()}`,
-            role: 'user',
-            content: displayMessage,
-            timestamp: new Date().toISOString(),
-            sessionId: optimisticSessionId,
-            turnId
-          }
-        ],
-        {
-          sessionId: optimisticSessionId,
-          turnId,
-          kind: 'reasoning',
-          status: 'running',
-          label: '正在思考中',
-          timestamp: new Date().toISOString()
-        }
-      )
-    );
+    setMessages((current) => {
+      const nextMessages = userMessageId
+        ? current.map((item) =>
+            String(item.id) === String(userMessageId)
+              ? {
+                  ...item,
+                  content: displayMessage,
+                  sessionId: optimisticSessionId,
+                  turnId,
+                  timestamp: item.timestamp || new Date().toISOString()
+                }
+              : item
+          )
+        : [
+            ...current,
+            {
+              id: `local-${Date.now()}`,
+              role: 'user',
+              content: displayMessage,
+              timestamp: new Date().toISOString(),
+              sessionId: optimisticSessionId,
+              turnId
+            }
+          ];
+      return upsertStatusMessage(nextMessages, {
+        sessionId: optimisticSessionId,
+        turnId,
+        kind: 'reasoning',
+        status: 'running',
+        label: '正在思考中',
+        timestamp: new Date().toISOString()
+      });
+    });
+    if (userMessageId) {
+      updateEditedReplacementTurn(sessionForTurn.id, userMessageId, {
+        sessionId: optimisticSessionId,
+        turnId
+      });
+    }
 
     try {
       const result = await apiFetch('/api/chat/send', {
