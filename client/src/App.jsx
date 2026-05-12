@@ -2618,6 +2618,12 @@ export default function App() {
     if (targetIndex <= 0) {
       return [];
     }
+    const hasLaterUserMessage = messages
+      .slice(targetIndex + 1)
+      .some((item) => item.role === 'user' && String(item.content || '').trim());
+    if (!hasLaterUserMessage) {
+      return [];
+    }
     return messages
       .slice(0, targetIndex)
       .filter((item) => (item.role === 'user' || item.role === 'assistant') && String(item.content || '').trim())
