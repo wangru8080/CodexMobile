@@ -9,6 +9,7 @@ import {
   Folder,
   Headphones,
   Image,
+  Info,
   Loader2,
   Menu,
   Mic,
@@ -1201,8 +1202,22 @@ function Drawer({
   );
 }
 
-function TopBar({ selectedProject, connectionState, onMenu, onOpenDocs }) {
+function TopBar({ selectedProject, selectedSession, connectionState, onMenu, onOpenDocs }) {
   const status = CONNECTION_STATUS[connectionState] || CONNECTION_STATUS.disconnected;
+  const [sessionInfoOpen, setSessionInfoOpen] = useState(false);
+  const [sessionCopied, setSessionCopied] = useState(false);
+  const sessionId = !isDraftSession(selectedSession) ? String(selectedSession?.id || '').trim() : '';
+
+  useEffect(() => {
+    setSessionInfoOpen(false);
+    setSessionCopied(false);
+  }, [sessionId]);
+
+  async function handleCopySessionId() {
+    const copied = await copyTextToClipboard(sessionId);
+    setSessionCopied(copied);
+  }
+
   return (
     <header className="top-bar">
       <button className="icon-button" onClick={onMenu} aria-label="打开菜单">
@@ -1214,6 +1229,31 @@ function TopBar({ selectedProject, connectionState, onMenu, onOpenDocs }) {
           <Wifi size={13} />
           {status.label}
         </span>
+        {sessionId ? (
+          <>
+            <button
+              type="button"
+              className={`session-info-button ${sessionInfoOpen ? 'is-active' : ''}`}
+              onClick={() => setSessionInfoOpen((open) => !open)}
+              aria-label="查看 Session ID"
+              aria-expanded={sessionInfoOpen}
+            >
+              <Info size={13} />
+            </button>
+            {sessionInfoOpen ? (
+              <div className="session-info-popover" role="status">
+                <div>
+                  <strong>Session ID</strong>
+                  <code>{sessionId}</code>
+                </div>
+                <button type="button" onClick={handleCopySessionId}>
+                  <Copy size={13} />
+                  {sessionCopied ? '已复制' : '复制'}
+                </button>
+              </div>
+            ) : null}
+          </>
+        ) : null}
       </div>
       <button type="button" className="icon-button" onClick={onOpenDocs} aria-label="打开文档">
         <FeishuLogoIcon size={23} className="top-docs-logo" />
@@ -5155,6 +5195,7 @@ export default function App() {
     <div className={shellClass}>
       <TopBar
         selectedProject={selectedProject}
+        selectedSession={selectedSession}
         connectionState={connectionState}
         onMenu={() => setDrawerOpen(true)}
         onOpenDocs={() => setDocsOpen(true)}
