@@ -147,11 +147,9 @@ async function copyTextToClipboard(text) {
   }
 }
 
-const PERMISSION_OPTIONS = [
-  { value: 'default', label: '默认权限' },
-  { value: 'acceptEdits', label: '自动接受编辑' },
-  { value: 'bypassPermissions', label: '完全访问', danger: true }
-];
+const APPROVAL_PROMPT_PATTERN =
+  /(拟执行操作清单|需要授权|请求授权|请明确回复|同意执行|批准执行|approve|approval|permission)/i;
+const APPROVAL_ALLOW_KEY = 'codexmobile.approvalAlwaysAllow';
 
 const REASONING_OPTIONS = [
   { value: 'low', label: '低' },
@@ -206,12 +204,67 @@ function shortModelName(model) {
     .replace(/-mini$/i, ' mini');
 }
 
-function permissionLabel(value) {
-  return PERMISSION_OPTIONS.find((option) => option.value === value)?.label || '默认权限';
-}
-
 function reasoningLabel(value) {
   return REASONING_OPTIONS.find((option) => option.value === value)?.label || '超高';
+}
+
+function normalizeApprovalSignature(text) {
+  return String(text || '')
+    .replace(/```[\s\S]*?```/g, (match) => match.replace(/\s+/g, ' '))
+    .replace(/\bturn-[a-z0-9-]+\b/gi, 'turn')
+    .replace(/\d{4}-\d{2}-\d{2}T[^\s]+/g, 'timestamp')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 360);
+}
+
+function approvalKindFromText(text) {
+  const value = String(text || '');
+  if (/apply_patch|补丁|修改文件|写入|覆盖|重命名|移动|删除|文件/.test(value)) {
+    return '文件操作';
+  }
+  if (/curl|wget|网络|联网|http|https|下载|访问互联网/i.test(value)) {
+    return '网络访问';
+  }
+  if (/命令|command|shell|bash|npm|node|python|git/i.test(value)) {
+    return '命令执行';
+  }
+  return '工具调用';
+}
+
+function approvalRiskFromText(text) {
+  const value = String(text || '');
+  if (/danger-full-access|完全访问|bypass|sudo|\/volume2\/SSD\/Trash|删除|rm\s+-|overwrite|覆盖/i.test(value)) {
+    return '高风险操作，请确认目标和影响范围。';
+  }
+  if (/curl|wget|http|https|下载|网络|互联网/i.test(value)) {
+    return '该操作会访问网络或外部服务。';
+  }
+  if (/写入|修改|patch|apply_patch|move|rename|重命名|移动/i.test(value)) {
+    return '该操作可能修改本地文件。';
+  }
+  return '';
+}
+
+function detectApprovalRequest(payload) {
+  const content = String(payload?.content || '').trim();
+  if (!content || !APPROVAL_PROMPT_PATTERN.test(content)) {
+    return null;
+  }
+  if (!/(请|是否|同意|批准|授权|approve|confirm|allow|deny|拒绝)/i.test(content)) {
+    return null;
+  }
+  return {
+    id: `${payload.turnId || 'turn'}:${payload.messageId || Date.now()}`,
+    turnId: payload.turnId,
+    sessionId: payload.sessionId,
+    previousSessionId: payload.previousSessionId,
+    projectId: payload.projectId,
+    title: approvalKindFromText(content),
+    detail: content,
+    risk: approvalRiskFromText(content),
+    signature: normalizeApprovalSignature(content)
+  };
 }
 
 function imageUrlWithRetry(url, retryKey) {
@@ -2053,6 +2106,40 @@ function VoiceDialogPanel({
   );
 }
 
+function ApprovalSheet({ request, busy, onApprove, onAlwaysAllow, onDeny }) {
+  if (!request) {
+    return null;
+  }
+
+  return (
+    <div className="approval-backdrop" role="presentation">
+      <section className="approval-sheet" role="dialog" aria-modal="true" aria-labelledby="approval-title">
+        <div className="approval-handle" />
+        <div className="approval-header">
+          <div>
+            <span className="approval-kicker">Codex 需要授权</span>
+            <h2 id="approval-title">{request.title}</h2>
+          </div>
+          {request.risk ? <span className="approval-risk">需确认</span> : null}
+        </div>
+        {request.risk ? <p className="approval-warning">{request.risk}</p> : null}
+        <pre className="approval-detail">{request.detail}</pre>
+        <div className="approval-actions">
+          <button type="button" className="approval-button secondary" onClick={onDeny} disabled={busy}>
+            拒绝
+          </button>
+          <button type="button" className="approval-button secondary" onClick={onAlwaysAllow} disabled={busy}>
+            始终允许
+          </button>
+          <button type="button" className="approval-button primary" onClick={onApprove} disabled={busy}>
+            {busy ? '处理中...' : '同意执行'}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function Composer({
   input,
   setInput,
@@ -2064,8 +2151,6 @@ function Composer({
   onSelectModel,
   selectedReasoningEffort,
   onSelectReasoningEffort,
-  permissionMode,
-  onSelectPermission,
   attachments,
   onUploadFiles,
   onRemoveAttachment,
@@ -2322,24 +2407,6 @@ function Composer({
           </button>
         </div>
       ) : null}
-      {openMenu === 'permission' ? (
-        <div className="composer-menu permission-menu">
-          {PERMISSION_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={`${permissionMode === option.value ? 'is-selected' : ''} ${option.danger ? 'is-danger' : ''}`}
-              onClick={() => {
-                onSelectPermission(option.value);
-                setOpenMenu(null);
-              }}
-            >
-              {permissionMode === option.value ? <Check size={16} /> : <span className="menu-spacer" />}
-              {option.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
       {openMenu === 'model' ? (
         <div className="composer-menu model-menu">
           <div className="menu-section-label">智能</div>
@@ -2408,10 +2475,6 @@ function Composer({
             <button type="button" className="ghost-icon" aria-label="添加" onClick={() => toggleMenu('attach')} disabled={uploading}>
               <Plus size={21} />
             </button>
-            <button type="button" className="permission-pill" onClick={() => toggleMenu('permission')}>
-              {permissionLabel(permissionMode)}
-              <ChevronDown size={15} />
-            </button>
           </div>
           <div className="control-right">
             <button type="button" className="model-select" onClick={() => toggleMenu('model')}>
@@ -2464,7 +2527,15 @@ export default function App() {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState([]);
   const [uploading, setUploading] = useState(false);
-  const [permissionMode, setPermissionMode] = useState('default');
+  const [approvalRequest, setApprovalRequest] = useState(null);
+  const [approvalBusy, setApprovalBusy] = useState(false);
+  const [approvalAlwaysAllow, setApprovalAlwaysAllow] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(APPROVAL_ALLOW_KEY) || '[]');
+    } catch {
+      return [];
+    }
+  });
   const [selectedModel, setSelectedModel] = useState(DEFAULT_STATUS.model);
   const [selectedReasoningEffort, setSelectedReasoningEffort] = useState(() => {
     const defaultVersion = localStorage.getItem('codexmobile.reasoningDefaultVersion');
@@ -2488,6 +2559,8 @@ export default function App() {
   const lastLocalRunAtRef = useRef(0);
   const activePollsRef = useRef(new Set());
   const turnRefreshTimersRef = useRef(new Map());
+  const approvalRequestRef = useRef(null);
+  const approvalAlwaysAllowRef = useRef(approvalAlwaysAllow);
   const editedMessageFiltersRef = useRef(new Map());
   const editedMessageReplacementsRef = useRef(new Map());
   const voiceDialogRecorderRef = useRef(null);
@@ -3685,6 +3758,57 @@ export default function App() {
     });
   }
 
+  function rememberAlwaysAllow(signature) {
+    if (!signature) {
+      return;
+    }
+    setApprovalAlwaysAllow((current) => {
+      const next = [signature, ...current.filter((item) => item !== signature)].slice(0, 50);
+      approvalAlwaysAllowRef.current = next;
+      localStorage.setItem(APPROVAL_ALLOW_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  async function respondToApproval(request, approved, alwaysAllow = false) {
+    if (!request || approvalBusy) {
+      return;
+    }
+    setApprovalBusy(true);
+    try {
+      if (alwaysAllow) {
+        rememberAlwaysAllow(request.signature);
+      }
+      const message = approved
+        ? '同意执行。请继续，并只执行你刚才请求授权的操作。'
+        : '拒绝执行。请不要执行刚才请求授权的操作，改用不需要该授权的方式或说明原因。';
+      setApprovalRequest(null);
+      approvalRequestRef.current = null;
+      await submitCodexMessage({
+        message,
+        clearComposer: false,
+        approvalSessionId: request.sessionId,
+        approvalPreviousSessionId: request.previousSessionId,
+        approvalProjectId: request.projectId
+      });
+    } finally {
+      setApprovalBusy(false);
+    }
+  }
+
+  function maybeShowApprovalRequest(payload) {
+    const request = detectApprovalRequest(payload);
+    if (!request || approvalRequestRef.current?.id === request.id) {
+      return;
+    }
+    if (approvalAlwaysAllowRef.current.includes(request.signature)) {
+      respondToApproval(request, true, false).catch(() => null);
+      return;
+    }
+    approvalRequestRef.current = request;
+    setApprovalRequest(request);
+  }
+
   function restoreTurnSnapshot(turn) {
     const currentSession = selectedSessionRef.current;
     if (!turn?.turnId || !currentSession || !payloadMatchesCurrentConversation(turn)) {
@@ -4173,6 +4297,7 @@ export default function App() {
           return;
         }
         if (payload.phase === 'commentary' || payload.kind === 'agent_message') {
+          maybeShowApprovalRequest(payload);
           setMessages((current) =>
             upsertStatusMessage(current, {
               ...payload,
@@ -4183,6 +4308,7 @@ export default function App() {
           );
           return;
         }
+        maybeShowApprovalRequest(payload);
         setMessages((current) => upsertAssistantMessage(current, payload));
         return;
       }
@@ -4750,9 +4876,15 @@ export default function App() {
     clearComposer = false,
     restoreTextOnError = false,
     userMessageId = '',
-    contextMessages = null
+    contextMessages = null,
+    approvalSessionId = null,
+    approvalPreviousSessionId = null,
+    approvalProjectId = null
   }) {
-    const project = selectedProject || selectedProjectRef.current;
+    const project =
+      (approvalProjectId && projects.find((item) => item.id === approvalProjectId)) ||
+      selectedProject ||
+      selectedProjectRef.current;
     const selectedAttachments = Array.isArray(attachmentsForTurn) ? attachmentsForTurn : [];
     const displayMessage = String(message || '').trim() || (selectedAttachments.length ? '请查看附件。' : '');
     if ((!displayMessage && !selectedAttachments.length) || !project) {
@@ -4762,7 +4894,10 @@ export default function App() {
       throw new Error(project ? 'message or attachments are required' : '请先选择项目');
     }
 
-    let sessionForTurn = selectedSession;
+    let sessionForTurn =
+      approvalSessionId
+        ? { ...(selectedSessionRef.current || {}), id: approvalSessionId, projectId: project.id, draft: false }
+        : selectedSession;
     if (!sessionForTurn) {
       sessionForTurn = createDraftSession(project);
       setSelectedSession(sessionForTurn);
@@ -4771,9 +4906,10 @@ export default function App() {
     }
 
     const turnId = createClientTurnId();
-    const draftSessionId = isDraftSession(sessionForTurn) ? sessionForTurn.id : null;
+    const draftSessionId = approvalSessionId ? null : isDraftSession(sessionForTurn) ? sessionForTurn.id : null;
     const outgoingSessionId = draftSessionId ? null : sessionForTurn?.id || null;
-    const optimisticSessionId = draftSessionId || outgoingSessionId || turnId;
+    const optimisticSessionId = approvalSessionId || draftSessionId || outgoingSessionId || turnId;
+    const previousSessionIdForTurn = approvalPreviousSessionId || draftSessionId || outgoingSessionId;
     const initialTitle = draftSessionId && !sessionForTurn.titleLocked
       ? titleFromFirstMessage(displayMessage)
       : null;
@@ -4783,7 +4919,7 @@ export default function App() {
       setAttachments([]);
     }
 
-    markRun({ turnId, sessionId: optimisticSessionId, previousSessionId: draftSessionId || outgoingSessionId });
+    markRun({ turnId, sessionId: optimisticSessionId, previousSessionId: previousSessionIdForTurn });
     setSelectedSession((current) =>
       current?.id === sessionForTurn?.id
         ? { ...current, turnId, ...(initialTitle ? { title: initialTitle, titleLocked: true } : {}) }
@@ -4846,7 +4982,6 @@ export default function App() {
           draftSessionId,
           clientTurnId: turnId,
           message: displayMessage,
-          permissionMode,
           model: selectedModel || status.model,
           reasoningEffort: selectedReasoningEffort || status.reasoningEffort || DEFAULT_REASONING_EFFORT,
           attachments: selectedAttachments,
@@ -4857,16 +4992,16 @@ export default function App() {
         turnId: result.turnId || turnId,
         optimisticSessionId,
         projectId: project.id,
-        previousSessionId: draftSessionId || outgoingSessionId
+        previousSessionId: previousSessionIdForTurn
       });
       return {
         turnId: result.turnId || turnId,
         optimisticSessionId,
         projectId: project.id,
-        previousSessionId: draftSessionId || outgoingSessionId
+        previousSessionId: previousSessionIdForTurn
       };
     } catch (error) {
-      clearRun({ turnId, sessionId: optimisticSessionId, previousSessionId: draftSessionId || outgoingSessionId });
+      clearRun({ turnId, sessionId: optimisticSessionId, previousSessionId: previousSessionIdForTurn });
       if (clearComposer) {
         setAttachments(selectedAttachments);
       }
@@ -4955,7 +5090,6 @@ export default function App() {
           draftSessionId,
           clientTurnId: turnId,
           message: displayMessage,
-          permissionMode,
           model: selectedModel || status.model,
           reasoningEffort: selectedReasoningEffort || status.reasoningEffort || DEFAULT_REASONING_EFFORT,
           attachments: selectedAttachments
@@ -5068,7 +5202,6 @@ export default function App() {
           draftSessionId,
           clientTurnId: turnId,
           message: displayMessage,
-          permissionMode,
           model: selectedModel || status.model,
           reasoningEffort: selectedReasoningEffort || status.reasoningEffort || DEFAULT_REASONING_EFFORT,
           attachments: []
@@ -5268,8 +5401,6 @@ export default function App() {
         onSelectModel={setSelectedModel}
         selectedReasoningEffort={selectedReasoningEffort}
         onSelectReasoningEffort={setSelectedReasoningEffort}
-        permissionMode={permissionMode}
-        onSelectPermission={setPermissionMode}
         attachments={attachments}
         onUploadFiles={handleUploadFiles}
         onRemoveAttachment={handleRemoveAttachment}
@@ -5277,6 +5408,13 @@ export default function App() {
         onVoiceSubmit={handleVoiceSubmit}
         onOpenVoiceDialog={openVoiceDialog}
         voiceDialogActive={voiceDialogOpen}
+      />
+      <ApprovalSheet
+        request={approvalRequest}
+        busy={approvalBusy}
+        onApprove={() => respondToApproval(approvalRequest, true, false)}
+        onAlwaysAllow={() => respondToApproval(approvalRequest, true, true)}
+        onDeny={() => respondToApproval(approvalRequest, false, false)}
       />
       <ImagePreviewModal image={previewImage} onClose={() => setPreviewImage(null)} />
     </div>

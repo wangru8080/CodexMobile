@@ -1422,7 +1422,7 @@ async function handleApi(req, res, url) {
       contextMessages,
       model: session?.model || body.model || config.model || 'gpt-5.5',
       reasoningEffort: body.reasoningEffort || DEFAULT_REASONING_EFFORT,
-      permissionMode: body.permissionMode || 'default'
+      permissionMode: null
     });
 
     sendJson(res, 202, { accepted: true, queued, sessionId: selectedSessionId, draftSessionId, turnId });

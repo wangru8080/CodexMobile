@@ -2042,10 +2042,6 @@ button {
   left: 14px;
 }
 
-.permission-menu {
-  left: 56px;
-}
-
 .model-menu {
   right: 12px;
   min-width: 176px;
@@ -2202,7 +2198,6 @@ button {
   justify-content: flex-end;
 }
 
-.permission-pill,
 .model-select {
   display: inline-flex;
   align-items: center;
@@ -2213,11 +2208,6 @@ button {
   background: transparent;
   white-space: nowrap;
   flex: 0 1 auto;
-}
-
-.permission-pill {
-  max-width: 118px;
-  overflow: hidden;
 }
 
 .model-select {
@@ -2495,6 +2485,123 @@ button {
   background: #eef0ec;
 }
 
+.approval-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 16px 12px calc(env(safe-area-inset-bottom, 0px) + 18px);
+  background: rgba(17, 24, 39, 0.26);
+}
+
+.approval-sheet {
+  width: min(100%, 390px);
+  max-height: min(72vh, 620px);
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px 12px;
+  border: 1px solid rgba(222, 223, 220, 0.94);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 52px rgba(20, 24, 31, 0.22);
+}
+
+.approval-handle {
+  width: 38px;
+  height: 4px;
+  margin: 0 auto 10px;
+  border-radius: 999px;
+  background: #d8dad6;
+}
+
+.approval-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.approval-kicker {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.approval-header h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 17px;
+  line-height: 22px;
+}
+
+.approval-risk {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: var(--danger);
+  background: rgba(194, 65, 58, 0.1);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.approval-warning {
+  margin: 10px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.approval-detail {
+  min-height: 74px;
+  max-height: 36vh;
+  margin: 12px 0 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid #e4e6e2;
+  border-radius: 10px;
+  color: #2f363f;
+  background: #f7f8f5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.approval-actions {
+  display: grid;
+  grid-template-columns: 0.82fr 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.approval-button {
+  min-width: 0;
+  min-height: 40px;
+  border: 0;
+  border-radius: 10px;
+  font-weight: 650;
+  font-size: 14px;
+}
+
+.approval-button.primary {
+  color: #fff;
+  background: #1f2328;
+}
+
+.approval-button.secondary {
+  color: #4b5563;
+  background: #eef0ec;
+}
+
+.approval-button:disabled {
+  opacity: 0.56;
+}
+
 [data-theme="dark"] .composer-wrap {
   background: rgba(23, 23, 23, 0.94);
   border-top-color: rgba(48, 48, 48, 0.9);
@@ -2542,7 +2649,6 @@ button {
   color: #85858e;
 }
 
-[data-theme="dark"] .permission-pill,
 [data-theme="dark"] .model-select {
   color: #d4d4d8;
 }
@@ -2658,6 +2764,41 @@ button {
 }
 
 [data-theme="dark"] .voice-dialog-secondary {
+  color: #e4e4e7;
+  background: #303030;
+}
+
+[data-theme="dark"] .approval-backdrop {
+  background: rgba(0, 0, 0, 0.42);
+}
+
+[data-theme="dark"] .approval-sheet {
+  border-color: #303030;
+  background: #202020;
+  box-shadow: 0 18px 52px rgba(0, 0, 0, 0.42);
+}
+
+[data-theme="dark"] .approval-handle {
+  background: #44444a;
+}
+
+[data-theme="dark"] .approval-risk {
+  color: #ffb4ae;
+  background: rgba(255, 107, 98, 0.14);
+}
+
+[data-theme="dark"] .approval-detail {
+  border-color: #303030;
+  color: #e4e4e7;
+  background: #252525;
+}
+
+[data-theme="dark"] .approval-button.primary {
+  color: #171717;
+  background: #f4f4f5;
+}
+
+[data-theme="dark"] .approval-button.secondary {
   color: #e4e4e7;
   background: #303030;
 }
@@ -2789,10 +2930,6 @@ button {
 }
 
 @media (max-width: 480px) {
-  .permission-pill {
-    max-width: 104px;
-  }
-
   .model-select {
     max-width: 104px;
   }
@@ -2809,11 +2946,6 @@ button {
 }
 
 @media (max-width: 380px) {
-  .permission-pill {
-    max-width: 92px;
-    overflow: hidden;
-  }
-
   .model-select {
     max-width: 86px;
   }

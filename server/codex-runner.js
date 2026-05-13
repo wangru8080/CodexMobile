@@ -39,9 +39,9 @@ function mapPermissionMode(permissionMode) {
     return { sandboxMode: 'danger-full-access', approvalPolicy: 'never' };
   }
   if (permissionMode === 'acceptEdits') {
-    return { sandboxMode: 'workspace-write', approvalPolicy: 'never' };
+    return { sandboxMode: 'workspace-write' };
   }
-  return { sandboxMode: 'workspace-write', approvalPolicy: 'never' };
+  return {};
 }
 
 function normalizeReasoningEffort(reasoningEffort) {
@@ -463,10 +463,10 @@ export async function runCodexTurn({ sessionId, draftSessionId, projectPath, mes
     const threadOptions = {
       workingDirectory,
       skipGitRepoCheck: true,
-      sandboxMode,
-      approvalPolicy,
       model,
       modelReasoningEffort,
+      ...(sandboxMode ? { sandboxMode } : {}),
+      ...(approvalPolicy ? { approvalPolicy } : {}),
       ...(larkCliContext.enabled ? { networkAccessEnabled: true } : {})
     };
 
