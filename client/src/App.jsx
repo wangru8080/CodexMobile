@@ -247,7 +247,11 @@ function approvalRiskFromText(text) {
 }
 
 function detectApprovalRequest(payload) {
-  const content = String(payload?.content || '').trim();
+  const content = [payload?.content, payload?.label, payload?.detail]
+    .map((part) => String(part || '').trim())
+    .filter(Boolean)
+    .join('\n')
+    .trim();
   if (!content || !APPROVAL_PROMPT_PATTERN.test(content)) {
     return null;
   }
@@ -3784,6 +3788,7 @@ export default function App() {
         : '拒绝执行。请不要执行刚才请求授权的操作，改用不需要该授权的方式或说明原因。';
       setApprovalRequest(null);
       approvalRequestRef.current = null;
+      await stopApprovalBlockedTurn(request);
       await submitCodexMessage({
         message,
         clearComposer: false,
@@ -3807,6 +3812,35 @@ export default function App() {
     }
     approvalRequestRef.current = request;
     setApprovalRequest(request);
+  }
+
+  async function stopApprovalBlockedTurn(request) {
+    const turnId = request?.turnId;
+    if (!turnId) {
+      return;
+    }
+    try {
+      await apiFetch('/api/chat/abort', {
+        method: 'POST',
+        body: { turnId, sessionId: request.sessionId || null }
+      });
+    } catch {
+      // The original turn may have already completed after asking in natural language.
+    }
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 12000) {
+      try {
+        const result = await apiFetch(`/api/chat/turns/${encodeURIComponent(turnId)}`);
+        const status = result.turn?.status;
+        if (!status || !['accepted', 'queued', 'running'].includes(status)) {
+          clearRun({ turnId, sessionId: request.sessionId, previousSessionId: request.previousSessionId });
+          return;
+        }
+      } catch {
+        return;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 450));
+    }
   }
 
   function restoreTurnSnapshot(turn) {
@@ -4319,6 +4353,7 @@ export default function App() {
         if (!payloadMatchesCurrentConversation(payload)) {
           return;
         }
+        maybeShowApprovalRequest(payload);
         if (payload.kind === 'turn' && payload.status === 'completed') {
           markTurnCompleted(payload);
           return;

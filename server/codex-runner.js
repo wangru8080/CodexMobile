@@ -335,7 +335,8 @@ function emitCodexEvent(event, sessionId, turnId, emit, state) {
         turnId,
         kind: kind === 'message' ? 'agent_message' : kind,
         status: 'running',
-        label: compactStatusLabel(content)
+        label: compactStatusLabel(content),
+        detail: content
       });
     }
     return;
