@@ -153,7 +153,7 @@ const APPROVAL_ALLOW_KEY = 'codexmobile.approvalAlwaysAllow';
 
 const PERMISSION_OPTIONS = [
   { value: 'default', label: '默认权限' },
-  { value: 'autoReview', label: '失败时询问' },
+  { value: 'askOnFailure', label: '失败时询问' },
   { value: 'bypassPermissions', label: '完全访问权限', danger: true },
   { value: 'customConfig', label: '自定义（config.toml）' }
 ];
