@@ -41,7 +41,7 @@ function mapPermissionMode(permissionMode) {
   if (permissionMode === 'bypassPermissions') {
     return { sandboxMode: 'danger-full-access', approvalPolicy: 'never' };
   }
-  if (permissionMode === 'askOnFailure') {
+  if (permissionMode === 'on-failure') {
     return { sandboxMode: 'workspace-write', approvalPolicy: 'on-failure' };
   }
   return { sandboxMode: 'workspace-write', approvalPolicy: 'on-request' };
