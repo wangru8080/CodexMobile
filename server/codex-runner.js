@@ -35,13 +35,16 @@ async function ensureAsciiWorkingDirectory(projectPath) {
 }
 
 function mapPermissionMode(permissionMode) {
+  if (permissionMode === 'customConfig') {
+    return {};
+  }
   if (permissionMode === 'bypassPermissions') {
     return { sandboxMode: 'danger-full-access', approvalPolicy: 'never' };
   }
-  if (permissionMode === 'acceptEdits') {
-    return { sandboxMode: 'workspace-write' };
+  if (permissionMode === 'autoReview') {
+    return { sandboxMode: 'workspace-write', approvalPolicy: 'on-failure' };
   }
-  return {};
+  return { sandboxMode: 'workspace-write', approvalPolicy: 'on-request' };
 }
 
 function normalizeReasoningEffort(reasoningEffort) {

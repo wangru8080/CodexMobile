@@ -2042,6 +2042,11 @@ button {
   left: 14px;
 }
 
+.permission-menu {
+  left: 56px;
+  min-width: 198px;
+}
+
 .model-menu {
   right: 12px;
   min-width: 176px;
@@ -2198,6 +2203,7 @@ button {
   justify-content: flex-end;
 }
 
+.permission-pill,
 .model-select {
   display: inline-flex;
   align-items: center;
@@ -2208,6 +2214,12 @@ button {
   background: transparent;
   white-space: nowrap;
   flex: 0 1 auto;
+}
+
+.permission-pill {
+  max-width: 146px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .model-select {
@@ -2649,6 +2661,7 @@ button {
   color: #85858e;
 }
 
+[data-theme="dark"] .permission-pill,
 [data-theme="dark"] .model-select {
   color: #d4d4d8;
 }
@@ -2930,6 +2943,10 @@ button {
 }
 
 @media (max-width: 480px) {
+  .permission-pill {
+    max-width: 112px;
+  }
+
   .model-select {
     max-width: 104px;
   }
@@ -2946,6 +2963,10 @@ button {
 }
 
 @media (max-width: 380px) {
+  .permission-pill {
+    max-width: 96px;
+  }
+
   .model-select {
     max-width: 86px;
   }

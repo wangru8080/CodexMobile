@@ -151,6 +151,13 @@ const APPROVAL_PROMPT_PATTERN =
   /(拟执行操作清单|需要授权|请求授权|请明确回复|同意执行|批准执行|approve|approval|permission)/i;
 const APPROVAL_ALLOW_KEY = 'codexmobile.approvalAlwaysAllow';
 
+const PERMISSION_OPTIONS = [
+  { value: 'default', label: '默认权限' },
+  { value: 'autoReview', label: '自动审查' },
+  { value: 'bypassPermissions', label: '完全访问权限', danger: true },
+  { value: 'customConfig', label: '自定义（config.toml）' }
+];
+
 const REASONING_OPTIONS = [
   { value: 'low', label: '低' },
   { value: 'medium', label: '中' },
@@ -206,6 +213,10 @@ function shortModelName(model) {
 
 function reasoningLabel(value) {
   return REASONING_OPTIONS.find((option) => option.value === value)?.label || '超高';
+}
+
+function permissionLabel(value) {
+  return PERMISSION_OPTIONS.find((option) => option.value === value)?.label || '默认权限';
 }
 
 function normalizeApprovalSignature(text) {
@@ -2155,6 +2166,8 @@ function Composer({
   onSelectModel,
   selectedReasoningEffort,
   onSelectReasoningEffort,
+  permissionMode,
+  onSelectPermission,
   attachments,
   onUploadFiles,
   onRemoveAttachment,
@@ -2446,6 +2459,24 @@ function Composer({
           ))}
         </div>
       ) : null}
+      {openMenu === 'permission' ? (
+        <div className="composer-menu permission-menu">
+          {PERMISSION_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`${permissionMode === option.value ? 'is-selected' : ''} ${option.danger ? 'is-danger' : ''}`}
+              onClick={() => {
+                onSelectPermission(option.value);
+                setOpenMenu(null);
+              }}
+            >
+              {permissionMode === option.value ? <Check size={16} /> : <span className="menu-spacer" />}
+              <span>{option.label}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
       {voiceState !== 'idle' || voiceError ? (
         <div className={`voice-popover ${voiceError ? 'is-error' : ''}`}>
           <Mic size={14} />
@@ -2478,6 +2509,10 @@ function Composer({
           <div className="control-left">
             <button type="button" className="ghost-icon" aria-label="添加" onClick={() => toggleMenu('attach')} disabled={uploading}>
               <Plus size={21} />
+            </button>
+            <button type="button" className="permission-pill" onClick={() => toggleMenu('permission')}>
+              {permissionLabel(permissionMode)}
+              <ChevronDown size={15} />
             </button>
           </div>
           <div className="control-right">
@@ -2531,6 +2566,7 @@ export default function App() {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState([]);
   const [uploading, setUploading] = useState(false);
+  const [permissionMode, setPermissionMode] = useState('default');
   const [approvalRequest, setApprovalRequest] = useState(null);
   const [approvalBusy, setApprovalBusy] = useState(false);
   const [approvalAlwaysAllow, setApprovalAlwaysAllow] = useState(() => {
@@ -5017,6 +5053,7 @@ export default function App() {
           draftSessionId,
           clientTurnId: turnId,
           message: displayMessage,
+          permissionMode,
           model: selectedModel || status.model,
           reasoningEffort: selectedReasoningEffort || status.reasoningEffort || DEFAULT_REASONING_EFFORT,
           attachments: selectedAttachments,
@@ -5436,6 +5473,8 @@ export default function App() {
         onSelectModel={setSelectedModel}
         selectedReasoningEffort={selectedReasoningEffort}
         onSelectReasoningEffort={setSelectedReasoningEffort}
+        permissionMode={permissionMode}
+        onSelectPermission={setPermissionMode}
         attachments={attachments}
         onUploadFiles={handleUploadFiles}
         onRemoveAttachment={handleRemoveAttachment}
