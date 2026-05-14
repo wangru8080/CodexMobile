@@ -15,7 +15,7 @@
 
 - 第一阶段：常量与工具函数拆分，已完成。
 - 第二阶段：UI 组件拆分，已完成。
-- 第三阶段：hooks 拆分，进行中；第 3.1、3.2、3.3、3.4 批已完成。
+- 第三阶段：hooks 拆分，进行中；第 3.1、3.2、3.3、3.4 批已完成，第 3.5 第一批已完成。
 
 ## 第 3.1 批：偏好与 UI 环境状态
 
@@ -114,13 +114,14 @@
 
 ## 第 3.5 批：实时语音对话
 
-状态：未开始
+状态：部分完成（第一批已抽取语音对话整体 hook，后续可继续细分实时音频播放、实时麦克风、handoff）
 
 目标：拆分最高风险的实时语音逻辑，必要时再细分为多批。
 
 拟新增文件：
 
-- `client/src/hooks/useRealtimeVoice.js`
+- `client/src/hooks/useVoiceDialog.js`
+- 可选：`client/src/hooks/useRealtimeVoice.js`
 - 可选：`client/src/hooks/useRealtimeAudioPlayback.js`
 - 可选：`client/src/hooks/useVoiceHandoff.js`
 
@@ -174,8 +175,8 @@
 
 ### 3.5 实时语音对话
 
-- 状态：未开始
-- 完成时间：
-- Commit：
-- 验证命令：
-- 备注：
+- 状态：部分完成
+- 完成时间：2026-05-14 15:40:00 CST
+- Commit：本次提交
+- 验证命令：`npm run build` 通过
+- 备注：第一批新增 `useVoiceDialog`，整体迁移语音对话状态、普通语音对话录音/TTS、实时语音 WebSocket、PCM 采集、播放队列、打断、静音检测和 handoff 总结；后续可继续把实时音频播放、实时麦克风、handoff 细分为子 hook。
