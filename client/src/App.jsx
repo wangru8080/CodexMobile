@@ -124,7 +124,8 @@ export default function App() {
     clearRun,
     markTurnCompleted,
     scheduleTurnRefresh,
-    pollTurnUntilComplete
+    pollTurnUntilComplete,
+    handleAbort
   } = useChatTurns({
     filterEditedMessages,
     payloadMatchesCurrentConversation,
@@ -2023,22 +2024,7 @@ export default function App() {
     });
   }
 
-  async function handleAbort() {
-    const abortId =
-      selectedSessionRef.current?.id ||
-      selectedSessionRef.current?.turnId ||
-      Object.keys(runningById)[0];
-    if (!abortId) {
-      return;
-    }
-    await apiFetch('/api/chat/abort', {
-      method: 'POST',
-      body: { sessionId: abortId, turnId: selectedSessionRef.current?.turnId || null }
-    }).catch(() => null);
-    const payload = { sessionId: abortId, turnId: selectedSessionRef.current?.turnId || null };
-    clearRun(payload);
-    setMessages((current) => finishActivityMessagesForTurn(current, payload));
-  }
+
 
   const shellClass = useMemo(() => (drawerOpen ? 'app-shell drawer-active' : 'app-shell'), [drawerOpen]);
 

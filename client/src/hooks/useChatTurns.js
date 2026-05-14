@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../api.js';
 import {
   hasAssistantMessageForTurn,
+  finishActivityMessagesForTurn,
   hasVisibleAssistantForTurn,
   payloadRunKeys,
   removeActivityMessagesForTurn,
@@ -298,6 +299,24 @@ export function useChatTurns({
     }
   }
 
+
+  async function handleAbort() {
+    const abortId =
+      selectedSessionRef?.current?.id ||
+      selectedSessionRef?.current?.turnId ||
+      Object.keys(runningByIdRef.current)[0];
+    if (!abortId) {
+      return;
+    }
+    await apiFetch('/api/chat/abort', {
+      method: 'POST',
+      body: { sessionId: abortId, turnId: selectedSessionRef?.current?.turnId || null }
+    }).catch(() => null);
+    const payload = { sessionId: abortId, turnId: selectedSessionRef?.current?.turnId || null };
+    clearRun(payload);
+    setMessages((current) => finishActivityMessagesForTurn(current, payload));
+  }
+
   useEffect(
     () => () => {
       for (const timer of turnRefreshTimersRef.current.values()) {
@@ -325,6 +344,7 @@ export function useChatTurns({
     turnMatchesCurrentSelection,
     applyTurnSession,
     loadTurnMessages,
-    pollTurnUntilComplete
+    pollTurnUntilComplete,
+    handleAbort
   };
 }
