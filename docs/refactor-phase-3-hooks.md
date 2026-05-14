@@ -114,7 +114,7 @@
 
 ## 第 3.5 批：实时语音对话
 
-状态：部分完成（第一批已抽取语音对话整体 hook，后续可继续细分实时音频播放、实时麦克风、handoff）
+状态：部分完成（已抽取语音对话整体 hook 和实时音频播放 hook，后续可继续细分实时麦克风、handoff）
 
 目标：拆分最高风险的实时语音逻辑，必要时再细分为多批。
 
@@ -122,6 +122,7 @@
 
 - `client/src/hooks/useVoiceDialog.js`
 - 可选：`client/src/hooks/useRealtimeVoice.js`
+- `client/src/hooks/useRealtimePlayback.js`
 - 可选：`client/src/hooks/useRealtimeAudioPlayback.js`
 - 可选：`client/src/hooks/useVoiceHandoff.js`
 
@@ -179,4 +180,4 @@
 - 完成时间：2026-05-14 15:40:00 CST
 - Commit：本次提交
 - 验证命令：`npm run build` 通过
-- 备注：第一批新增 `useVoiceDialog`，整体迁移语音对话状态、普通语音对话录音/TTS、实时语音 WebSocket、PCM 采集、播放队列、打断、静音检测和 handoff 总结；后续可继续把实时音频播放、实时麦克风、handoff 细分为子 hook。
+- 备注：第一批新增 `useVoiceDialog`，整体迁移语音对话状态、普通语音对话录音/TTS、实时语音 WebSocket、PCM 采集、播放队列、打断、静音检测和 handoff 总结；第二批新增 `useRealtimePlayback`，迁移实时音频播放队列、播放 AudioContext 和 PCM 播放。后续可继续把实时麦克风、handoff 细分为子 hook。

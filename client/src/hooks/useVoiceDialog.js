@@ -18,9 +18,9 @@ import {
   floatToPcm16Base64,
   isBenignRealtimeCancelError,
   isVoiceHandoffCommand,
-  pcm16Base64ToFloat,
   spokenReplyText
 } from '../app-helpers.js';
+import { useRealtimePlayback } from './useRealtimePlayback.js';
 
 export function useVoiceDialog({
   handleVoiceSubmit,
@@ -54,9 +54,6 @@ export function useVoiceDialog({
   const voiceRealtimeAudioContextRef = useRef(null);
   const voiceRealtimeAudioSourceRef = useRef(null);
   const voiceRealtimeProcessorRef = useRef(null);
-  const voiceRealtimePlaybackContextRef = useRef(null);
-  const voiceRealtimePlaybackSourcesRef = useRef(new Set());
-  const voiceRealtimePlayheadRef = useRef(0);
   const voiceRealtimeAssistantTextRef = useRef('');
   const voiceRealtimeSpeechStartedRef = useRef(false);
   const voiceRealtimeTurnStartedAtRef = useRef(0);
@@ -84,6 +81,19 @@ export function useVoiceDialog({
     voiceDialogHandoffDraftRef.current = value;
     setVoiceDialogHandoffDraft(value);
   }
+
+  const {
+    playRealtimeAudioDelta,
+    stopRealtimePlayback,
+    voiceRealtimePlaybackSourcesRef
+  } = useRealtimePlayback({
+    outputSampleRate: status.voiceRealtime?.outputSampleRate,
+    setVoiceDialogMode,
+    voiceDialogOpenRef,
+    voiceDialogRealtimeRef,
+    voiceDialogStateRef,
+    voiceRealtimeAwaitingResponseRef
+  });
 
   function clearVoiceDialogTimer() {
     if (voiceDialogTimerRef.current) {
@@ -228,24 +238,6 @@ export function useVoiceDialog({
     window.speechSynthesis?.cancel?.();
   }
 
-  function stopRealtimePlayback({ release = false } = {}) {
-    for (const source of voiceRealtimePlaybackSourcesRef.current) {
-      try {
-        source.stop();
-      } catch {
-        // Already stopped.
-      }
-    }
-    voiceRealtimePlaybackSourcesRef.current.clear();
-    const context = voiceRealtimePlaybackContextRef.current;
-    voiceRealtimePlayheadRef.current = context?.currentTime || 0;
-    if (release && context && context.state !== 'closed') {
-      context.close?.().catch?.(() => null);
-      voiceRealtimePlaybackContextRef.current = null;
-      voiceRealtimePlayheadRef.current = 0;
-    }
-  }
-
   function stopRealtimeVoiceDialog({ keepPanel = false } = {}) {
     const socket = voiceRealtimeSocketRef.current;
     voiceRealtimeSocketRef.current = null;
@@ -288,49 +280,6 @@ export function useVoiceDialog({
     if (!keepPanel) {
       voiceDialogRealtimeRef.current = false;
     }
-  }
-
-  function playRealtimeAudioDelta(delta) {
-    if (!delta) {
-      return;
-    }
-    const samples = pcm16Base64ToFloat(delta);
-    if (!samples.length) {
-      return;
-    }
-    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextCtor) {
-      return;
-    }
-    let context = voiceRealtimePlaybackContextRef.current;
-    if (!context || context.state === 'closed') {
-      context = new AudioContextCtor();
-      voiceRealtimePlaybackContextRef.current = context;
-      voiceRealtimePlayheadRef.current = context.currentTime;
-    }
-    context.resume?.().catch?.(() => null);
-    const outputSampleRate = Number(status.voiceRealtime?.outputSampleRate) || REALTIME_VOICE_SAMPLE_RATE;
-    const buffer = context.createBuffer(1, samples.length, outputSampleRate);
-    buffer.copyToChannel(samples, 0);
-    const source = context.createBufferSource();
-    source.buffer = buffer;
-    source.connect(context.destination);
-    voiceRealtimePlaybackSourcesRef.current.add(source);
-    source.onended = () => {
-      voiceRealtimePlaybackSourcesRef.current.delete(source);
-      if (
-        voiceDialogOpenRef.current &&
-        voiceDialogRealtimeRef.current &&
-        voiceRealtimePlaybackSourcesRef.current.size === 0 &&
-        voiceDialogStateRef.current === 'speaking'
-      ) {
-        voiceRealtimeAwaitingResponseRef.current = false;
-        setVoiceDialogMode('listening');
-      }
-    };
-    const startAt = Math.max(voiceRealtimePlayheadRef.current, context.currentTime + 0.03);
-    source.start(startAt);
-    voiceRealtimePlayheadRef.current = startAt + buffer.duration;
   }
 
   function appendVoiceDialogIdeaTranscript(transcript) {
