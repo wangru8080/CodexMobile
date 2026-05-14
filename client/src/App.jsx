@@ -19,7 +19,6 @@ import {
   voiceDialogStatusLabel
 } from './app-helpers.js';
 import {
-  ApprovalSheet,
   ChatPane,
   Composer,
   DocsPanel,
@@ -30,7 +29,6 @@ import {
   VoiceDialogPanel
 } from './components/index.js';
 import { useReasoningPreference } from './hooks/useReasoningPreference.js';
-import { useApprovals } from './hooks/useApprovals.js';
 import { useCodexSocket } from './hooks/useCodexSocket.js';
 import { useDocsStatus } from './hooks/useDocsStatus.js';
 import { useProjects } from './hooks/useProjects.js';
@@ -272,15 +270,6 @@ export default function App() {
     setSelectedSession,
     setSessionsByProject,
     updateEditedReplacementTurn
-  });
-  const {
-    approvalRequest,
-    approvalBusy,
-    respondToApproval,
-    maybeShowApprovalRequest
-  } = useApprovals({
-    clearRun,
-    submitCodexMessage
   });
   const running =
     hasRunningKey(runningById, selectedRunKeys(selectedSession)) ||
@@ -552,7 +541,6 @@ export default function App() {
         return;
       }
       if (payload.phase === 'commentary' || payload.kind === 'agent_message') {
-        maybeShowApprovalRequest(payload);
         setMessages((current) =>
           upsertStatusMessage(current, {
             ...payload,
@@ -563,7 +551,6 @@ export default function App() {
         );
         return;
       }
-      maybeShowApprovalRequest(payload);
       setMessages((current) => upsertAssistantMessage(current, payload));
       return;
     }
@@ -574,7 +561,6 @@ export default function App() {
       if (!payloadMatchesCurrentConversation(payload)) {
         return;
       }
-      maybeShowApprovalRequest(payload);
       if (payload.kind === 'turn' && payload.status === 'completed') {
         markTurnCompleted(payload);
         return;
@@ -942,13 +928,6 @@ export default function App() {
         onVoiceSubmit={handleVoiceSubmit}
         onOpenVoiceDialog={openVoiceDialog}
         voiceDialogActive={voiceDialogOpen}
-      />
-      <ApprovalSheet
-        request={approvalRequest}
-        busy={approvalBusy}
-        onApprove={() => respondToApproval(approvalRequest, true, false)}
-        onAlwaysAllow={() => respondToApproval(approvalRequest, true, true)}
-        onDeny={() => respondToApproval(approvalRequest, false, false)}
       />
       <ImagePreviewModal image={previewImage} onClose={() => setPreviewImage(null)} />
     </div>

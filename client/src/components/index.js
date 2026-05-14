@@ -15,6 +15,5 @@ export {
   renderMarkdownBlocks
 } from './ChatPane.jsx';
 export { VoiceDialogPanel } from './VoiceDialogPanel.jsx';
-export { ApprovalSheet } from './ApprovalSheet.jsx';
 export { Composer } from './Composer.jsx';
 export { ImagePreviewModal } from './ImagePreviewModal.jsx';

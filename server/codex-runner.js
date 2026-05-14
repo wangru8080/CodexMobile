@@ -44,7 +44,7 @@ function mapPermissionMode(permissionMode) {
   if (permissionMode === 'on-failure') {
     return { sandboxMode: 'workspace-write', approvalPolicy: 'on-failure' };
   }
-  return { sandboxMode: 'workspace-write', approvalPolicy: 'on-request' };
+  return { sandboxMode: 'workspace-write', approvalPolicy: 'on-failure' };
 }
 
 function normalizeReasoningEffort(reasoningEffort) {
