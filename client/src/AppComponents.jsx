@@ -42,8 +42,12 @@ import {
   formatBytes,
   formatTime,
   imageUrlWithRetry,
+  isDraftSession,
+  isVisibleActivityStep,
   permissionLabel,
-  reasoningLabel
+  reasoningLabel,
+  shortModelName,
+  voiceDialogStatusLabel
 } from './app-helpers.js';
 
 export function PairingScreen({ onPaired }) {
@@ -1711,4 +1715,3 @@ export function Composer({
     </form>
   );
 }
-
