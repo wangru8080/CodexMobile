@@ -55,7 +55,7 @@ import {
   PairingScreen,
   TopBar,
   VoiceDialogPanel
-} from './AppComponents.jsx';
+} from './components/index.js';
 
 export default function App() {
   const [status, setStatus] = useState(DEFAULT_STATUS);
