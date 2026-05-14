@@ -58,6 +58,7 @@ import { useDocsStatus } from './hooks/useDocsStatus.js';
 import { useProjects } from './hooks/useProjects.js';
 import { useTheme } from './hooks/useTheme.js';
 import { useViewportKeyboard } from './hooks/useViewportKeyboard.js';
+import { useVoiceInput } from './hooks/useVoiceInput.js';
 
 export default function App() {
   const [status, setStatus] = useState(DEFAULT_STATUS);
@@ -2256,6 +2257,8 @@ export default function App() {
     }
   }
 
+  const { handleVoiceSubmit } = useVoiceInput({ submitCodexMessage });
+
   async function handleSubmit() {
     const message = input.trim();
     if ((!message && !attachments.length) || !selectedProject) {
@@ -2366,108 +2369,6 @@ export default function App() {
       }
       return `${base}\n${value}`;
     });
-  }
-
-  async function handleVoiceSubmit(transcript) {
-    const message = String(transcript || '').trim();
-    if (!message) {
-      throw new Error('没有识别到文字');
-    }
-    return submitCodexMessage({
-      message,
-      attachmentsForTurn: [],
-      restoreTextOnError: true
-    });
-    if (!selectedProject) {
-      restoreVoiceTextToInput(message);
-      throw new Error('请先选择项目');
-    }
-
-    let sessionForTurn = selectedSession;
-    if (!sessionForTurn) {
-      sessionForTurn = createDraftSession(selectedProject);
-      setSelectedSession(sessionForTurn);
-      setExpandedProjectIds((current) => ({ ...current, [selectedProject.id]: true }));
-      setSessionsByProject((current) => upsertSessionInProject(current, selectedProject.id, sessionForTurn));
-    }
-
-    const turnId = createClientTurnId();
-    const draftSessionId = isDraftSession(sessionForTurn) ? sessionForTurn.id : null;
-    const outgoingSessionId = draftSessionId ? null : sessionForTurn?.id || null;
-    const optimisticSessionId = draftSessionId || outgoingSessionId || turnId;
-    const displayMessage = message;
-    const initialTitle = draftSessionId && !sessionForTurn.titleLocked
-      ? titleFromFirstMessage(displayMessage)
-      : null;
-
-    markRun({ turnId, sessionId: optimisticSessionId, previousSessionId: draftSessionId || outgoingSessionId });
-    setSelectedSession((current) =>
-      current?.id === sessionForTurn?.id
-        ? { ...current, turnId, ...(initialTitle ? { title: initialTitle, titleLocked: true } : {}) }
-        : current
-    );
-    if (initialTitle) {
-      setSessionsByProject((current) => ({
-        ...current,
-        [selectedProject.id]: (current[selectedProject.id] || []).map((item) =>
-          item.id === sessionForTurn.id ? { ...item, title: initialTitle, titleLocked: true } : item
-        )
-      }));
-    }
-    setMessages((current) => [
-      ...current,
-      {
-        id: `local-${Date.now()}`,
-        role: 'user',
-        content: displayMessage,
-        timestamp: new Date().toISOString(),
-        sessionId: optimisticSessionId,
-        turnId
-      }
-    ]);
-
-    try {
-      const result = await apiFetch('/api/chat/send', {
-        method: 'POST',
-        body: {
-          projectId: selectedProject.id,
-          sessionId: outgoingSessionId,
-          draftSessionId,
-          clientTurnId: turnId,
-          message: displayMessage,
-          model: selectedModel || status.model,
-          reasoningEffort: selectedReasoningEffort || status.reasoningEffort || DEFAULT_REASONING_EFFORT,
-          attachments: []
-        }
-      });
-      pollTurnUntilComplete({
-        turnId: result.turnId || turnId,
-        optimisticSessionId,
-        projectId: selectedProject.id,
-        previousSessionId: draftSessionId || outgoingSessionId
-      });
-      return {
-        turnId: result.turnId || turnId,
-        optimisticSessionId,
-        projectId: selectedProject.id,
-        previousSessionId: draftSessionId || outgoingSessionId
-      };
-    } catch (error) {
-      clearRun({ turnId, sessionId: optimisticSessionId, previousSessionId: draftSessionId || outgoingSessionId });
-      restoreVoiceTextToInput(displayMessage);
-      setMessages((current) =>
-        upsertStatusMessage(current, {
-          sessionId: optimisticSessionId,
-          turnId,
-          kind: 'turn',
-          status: 'failed',
-          label: '发送失败',
-          detail: error.message,
-          timestamp: new Date().toISOString()
-        })
-      );
-      throw error;
-    }
   }
 
   async function handleAbort() {
