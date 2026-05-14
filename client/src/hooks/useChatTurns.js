@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../api.js';
 import {
+  createClientTurnId,
+  createDraftSession,
   hasAssistantMessageForTurn,
   finishActivityMessagesForTurn,
   hasVisibleAssistantForTurn,
@@ -21,12 +23,14 @@ export function useChatTurns({
   reasoningEffort,
   selectedSessionRef,
   selectedProject,
+  selectedProjectRef,
   setAttachments,
   setExpandedProjectIds,
   setInput,
   setMessages,
   setSelectedSession,
-  setSessionsByProject
+  setSessionsByProject,
+  updateEditedReplacementTurn
 } = {}) {
   const [runningById, setRunningById] = useState({});
   const runningByIdRef = useRef({});
