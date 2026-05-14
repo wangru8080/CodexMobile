@@ -9,8 +9,6 @@ import {
   REALTIME_VOICE_BUFFER_SIZE,
   REALTIME_VOICE_MIN_TURN_MS,
   REALTIME_VOICE_SAMPLE_RATE,
-  REASONING_DEFAULT_VERSION,
-  THEME_KEY,
   VOICE_DIALOG_LEVEL_THRESHOLD,
   VOICE_DIALOG_MIN_RECORDING_MS,
   VOICE_DIALOG_SILENCE_AUDIO,
@@ -56,6 +54,9 @@ import {
   TopBar,
   VoiceDialogPanel
 } from './components/index.js';
+import { useReasoningPreference } from './hooks/useReasoningPreference.js';
+import { useTheme } from './hooks/useTheme.js';
+import { useViewportKeyboard } from './hooks/useViewportKeyboard.js';
 
 export default function App() {
   const [status, setStatus] = useState(DEFAULT_STATUS);
@@ -86,19 +87,9 @@ export default function App() {
     }
   });
   const [selectedModel, setSelectedModel] = useState(DEFAULT_STATUS.model);
-  const [selectedReasoningEffort, setSelectedReasoningEffort] = useState(() => {
-    const defaultVersion = localStorage.getItem('codexmobile.reasoningDefaultVersion');
-    if (defaultVersion !== REASONING_DEFAULT_VERSION) {
-      localStorage.setItem('codexmobile.reasoningDefaultVersion', REASONING_DEFAULT_VERSION);
-      localStorage.setItem('codexmobile.reasoningEffort', DEFAULT_REASONING_EFFORT);
-      return DEFAULT_REASONING_EFFORT;
-    }
-    return localStorage.getItem('codexmobile.reasoningEffort') || DEFAULT_REASONING_EFFORT;
-  });
+  const [selectedReasoningEffort, setSelectedReasoningEffort] = useReasoningPreference(status.reasoningEffort);
   const [runningById, setRunningById] = useState({});
-  const [theme, setTheme] = useState(() =>
-    localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light'
-  );
+  const [theme, setTheme] = useTheme();
   const [syncing, setSyncing] = useState(false);
   const [connectionState, setConnectionState] = useState(() => (getToken() ? 'connecting' : 'disconnected'));
   const wsRef = useRef(null);
@@ -303,47 +294,7 @@ export default function App() {
   const [voiceDialogAssistantText, setVoiceDialogAssistantText] = useState('');
   const [voiceDialogHandoffDraft, setVoiceDialogHandoffDraft] = useState('');
 
-  useEffect(() => {
-    const root = document.documentElement;
-    let frame = 0;
-    const updateViewport = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        const viewport = window.visualViewport;
-        const height = Math.round(viewport?.height || window.innerHeight || 0);
-        const width = Math.round(viewport?.width || window.innerWidth || 0);
-        const layoutHeight = Math.round(document.documentElement.clientHeight || window.innerHeight || 0);
-        const keyboardOpen = height > 0 && layoutHeight > 0 && layoutHeight - height > 120;
-        if (height > 0) {
-          root.style.setProperty('--app-height', `${height}px`);
-        }
-        if (width > 0) {
-          root.style.setProperty('--app-width', `${width}px`);
-        }
-        root.dataset.keyboard = keyboardOpen ? 'open' : 'closed';
-        if (window.scrollX || window.scrollY) {
-          window.scrollTo(0, 0);
-        }
-      });
-    };
-
-    updateViewport();
-    window.visualViewport?.addEventListener('resize', updateViewport);
-    window.visualViewport?.addEventListener('scroll', updateViewport);
-    window.addEventListener('resize', updateViewport);
-    window.addEventListener('orientationchange', updateViewport);
-
-    return () => {
-      cancelAnimationFrame(frame);
-      window.visualViewport?.removeEventListener('resize', updateViewport);
-      window.visualViewport?.removeEventListener('scroll', updateViewport);
-      window.removeEventListener('resize', updateViewport);
-      window.removeEventListener('orientationchange', updateViewport);
-      root.style.removeProperty('--app-height');
-      root.style.removeProperty('--app-width');
-      delete root.dataset.keyboard;
-    };
-  }, []);
+  useViewportKeyboard();
 
   const running =
     hasRunningKey(runningById, selectedRunKeys(selectedSession)) ||
@@ -1666,28 +1617,10 @@ export default function App() {
   }, [messages, runningById, voiceDialogOpen]);
 
   useEffect(() => {
-    localStorage.setItem(THEME_KEY, theme);
-    document.documentElement.dataset.theme = theme;
-  }, [theme]);
-
-  useEffect(() => {
-    if (selectedReasoningEffort) {
-      localStorage.setItem('codexmobile.reasoningEffort', selectedReasoningEffort);
-    }
-  }, [selectedReasoningEffort]);
-
-  useEffect(() => {
     if (status.model && selectedModel === DEFAULT_STATUS.model) {
       setSelectedModel(status.model);
     }
   }, [selectedModel, status.model]);
-
-  useEffect(() => {
-    const saved = localStorage.getItem('codexmobile.reasoningEffort');
-    if (!saved && status.reasoningEffort && !selectedReasoningEffort) {
-      setSelectedReasoningEffort(status.reasoningEffort);
-    }
-  }, [selectedReasoningEffort, status.reasoningEffort]);
 
   const loadStatus = useCallback(async () => {
     const data = await apiFetch('/api/status');
