@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { apiBlobFetch, apiFetch, clearToken, getToken, realtimeVoiceWebsocketUrl, websocketUrl } from './api.js';
+import { apiBlobFetch, apiFetch, clearToken, getToken, realtimeVoiceWebsocketUrl } from './api.js';
 import {
-  APPROVAL_ALLOW_KEY,
   DEFAULT_REASONING_EFFORT,
   DEFAULT_STATUS,
   REALTIME_VOICE_BARGE_IN_LEVEL_THRESHOLD,
@@ -18,7 +17,6 @@ import {
   completeStatusMessage,
   createClientTurnId,
   createDraftSession,
-  detectApprovalRequest,
   downsampleAudio,
   finishActivityMessagesForTurn,
   floatToPcm16Base64,
@@ -29,7 +27,6 @@ import {
   isDraftSession,
   isVoiceHandoffCommand,
   mergeActivityStep,
-  normalizeApprovalSignature,
   pcm16Base64ToFloat,
   payloadRunKeys,
   realtimePayloadErrorMessage,
@@ -55,6 +52,8 @@ import {
   VoiceDialogPanel
 } from './components/index.js';
 import { useReasoningPreference } from './hooks/useReasoningPreference.js';
+import { useApprovals } from './hooks/useApprovals.js';
+import { useCodexSocket } from './hooks/useCodexSocket.js';
 import { useDocsStatus } from './hooks/useDocsStatus.js';
 import { useProjects } from './hooks/useProjects.js';
 import { useTheme } from './hooks/useTheme.js';
@@ -71,30 +70,17 @@ export default function App() {
   const [attachments, setAttachments] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [permissionMode, setPermissionMode] = useState('default');
-  const [approvalRequest, setApprovalRequest] = useState(null);
-  const [approvalBusy, setApprovalBusy] = useState(false);
-  const [approvalAlwaysAllow, setApprovalAlwaysAllow] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem(APPROVAL_ALLOW_KEY) || '[]');
-    } catch {
-      return [];
-    }
-  });
   const [selectedModel, setSelectedModel] = useState(DEFAULT_STATUS.model);
   const [selectedReasoningEffort, setSelectedReasoningEffort] = useReasoningPreference(status.reasoningEffort);
   const [runningById, setRunningById] = useState({});
   const [theme, setTheme] = useTheme();
   const [syncing, setSyncing] = useState(false);
-  const [connectionState, setConnectionState] = useState(() => (getToken() ? 'connecting' : 'disconnected'));
-  const wsRef = useRef(null);
   const selectedProjectRef = useRef(null);
   const selectedSessionRef = useRef(null);
   const runningByIdRef = useRef({});
   const lastLocalRunAtRef = useRef(0);
   const activePollsRef = useRef(new Set());
   const turnRefreshTimersRef = useRef(new Map());
-  const approvalRequestRef = useRef(null);
-  const approvalAlwaysAllowRef = useRef(approvalAlwaysAllow);
   const editedMessageFiltersRef = useRef(new Map());
   const editedMessageReplacementsRef = useRef(new Map());
   const voiceDialogRecorderRef = useRef(null);
@@ -132,6 +118,15 @@ export default function App() {
   const voiceRealtimeSuppressAssistantAudioRef = useRef(false);
   const voiceDialogIdeaBufferRef = useRef([]);
   const voiceDialogHandoffDraftRef = useRef('');
+  const {
+    approvalRequest,
+    approvalBusy,
+    respondToApproval,
+    maybeShowApprovalRequest
+  } = useApprovals({
+    clearRun,
+    submitCodexMessage
+  });
 
   function editedMessageKey(message) {
     const role = String(message?.role || '').trim();
@@ -1282,87 +1277,6 @@ export default function App() {
     });
   }
 
-  function rememberAlwaysAllow(signature) {
-    if (!signature) {
-      return;
-    }
-    setApprovalAlwaysAllow((current) => {
-      const next = [signature, ...current.filter((item) => item !== signature)].slice(0, 50);
-      approvalAlwaysAllowRef.current = next;
-      localStorage.setItem(APPROVAL_ALLOW_KEY, JSON.stringify(next));
-      return next;
-    });
-  }
-
-  async function respondToApproval(request, approved, alwaysAllow = false) {
-    if (!request || approvalBusy) {
-      return;
-    }
-    setApprovalBusy(true);
-    try {
-      if (alwaysAllow) {
-        rememberAlwaysAllow(request.signature);
-      }
-      const message = approved
-        ? '同意执行。请继续，并只执行你刚才请求授权的操作。'
-        : '拒绝执行。请不要执行刚才请求授权的操作，改用不需要该授权的方式或说明原因。';
-      setApprovalRequest(null);
-      approvalRequestRef.current = null;
-      await stopApprovalBlockedTurn(request);
-      await submitCodexMessage({
-        message,
-        clearComposer: false,
-        approvalSessionId: request.sessionId,
-        approvalPreviousSessionId: request.previousSessionId,
-        approvalProjectId: request.projectId
-      });
-    } finally {
-      setApprovalBusy(false);
-    }
-  }
-
-  function maybeShowApprovalRequest(payload) {
-    const request = detectApprovalRequest(payload);
-    if (!request || approvalRequestRef.current?.id === request.id) {
-      return;
-    }
-    if (approvalAlwaysAllowRef.current.includes(request.signature)) {
-      respondToApproval(request, true, false).catch(() => null);
-      return;
-    }
-    approvalRequestRef.current = request;
-    setApprovalRequest(request);
-  }
-
-  async function stopApprovalBlockedTurn(request) {
-    const turnId = request?.turnId;
-    if (!turnId) {
-      return;
-    }
-    try {
-      await apiFetch('/api/chat/abort', {
-        method: 'POST',
-        body: { turnId, sessionId: request.sessionId || null }
-      });
-    } catch {
-      // The original turn may have already completed after asking in natural language.
-    }
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < 12000) {
-      try {
-        const result = await apiFetch(`/api/chat/turns/${encodeURIComponent(turnId)}`);
-        const status = result.turn?.status;
-        if (!status || !['accepted', 'queued', 'running'].includes(status)) {
-          clearRun({ turnId, sessionId: request.sessionId, previousSessionId: request.previousSessionId });
-          return;
-        }
-      } catch {
-        return;
-      }
-      await new Promise((resolve) => window.setTimeout(resolve, 450));
-    }
-  }
-
   function restoreTurnSnapshot(turn) {
     const currentSession = selectedSessionRef.current;
     if (!turn?.turnId || !currentSession || !payloadMatchesCurrentConversation(turn)) {
@@ -1694,210 +1608,176 @@ export default function App() {
     bootstrap();
   }, [bootstrap]);
 
-  useEffect(() => {
-    if (!authenticated || !getToken()) {
-      setConnectionState('disconnected');
-      return undefined;
+  const handleSocketPayload = useCallback((payload, { setConnectionState: setSocketConnectionState }) => {
+    if (payload.type === 'connected') {
+      setStatus(payload.status || DEFAULT_STATUS);
+      setSocketConnectionState(payload.status?.connected ? 'connected' : 'disconnected');
+      syncActiveRunsFromStatus(payload.status || DEFAULT_STATUS);
+      return;
     }
-
-    let stopped = false;
-    let reconnectTimer = null;
-
-    const connect = () => {
-      setConnectionState('connecting');
-      const ws = new WebSocket(websocketUrl());
-      wsRef.current = ws;
-
-      ws.onopen = () => setConnectionState('connecting');
-      ws.onclose = () => {
-        setConnectionState('disconnected');
-        if (!stopped) {
-          reconnectTimer = window.setTimeout(connect, 1200);
-        }
-      };
-      ws.onerror = () => setConnectionState('disconnected');
-      ws.onmessage = (event) => {
-      const payload = JSON.parse(event.data);
-      if (payload.type === 'connected') {
-        setStatus(payload.status || DEFAULT_STATUS);
-        setConnectionState(payload.status?.connected ? 'connected' : 'disconnected');
-        syncActiveRunsFromStatus(payload.status || DEFAULT_STATUS);
-        return;
-      }
-      if (payload.type === 'chat-started') {
-        markRun(payload);
-        if (!payloadMatchesCurrentConversation(payload)) {
-          return;
-        }
-        if (!selectedSessionRef.current && payload.sessionId) {
-          setSelectedSession({ id: payload.sessionId, projectId: payload.projectId, title: '新对话' });
-        }
-        return;
-      }
-      if (payload.type === 'thread-started' && payload.sessionId) {
-        const projectId = payload.projectId || selectedProjectRef.current?.id || selectedSessionRef.current?.projectId;
-        const currentSession = selectedSessionRef.current;
-        const nextSession = {
-          ...(currentSession || {}),
-          id: payload.sessionId,
-          projectId,
-          title: currentSession?.title || '新对话',
-          updatedAt: new Date().toISOString(),
-          draft: false
-        };
-        markRun(payload);
-        setSelectedSession((current) => {
-          if (!current) {
-            return nextSession;
-          }
-          const shouldReplace =
-            current.id === payload.previousSessionId ||
-            current.id === payload.sessionId ||
-            current.turnId === payload.turnId ||
-            (current.draft && current.projectId === projectId);
-          return shouldReplace ? { ...current, ...nextSession } : current;
-        });
-        setSessionsByProject((current) =>
-          upsertSessionInProject(current, projectId, nextSession, payload.previousSessionId)
-        );
-        setMessages((current) =>
-          current.map((message) =>
-            message.turnId === payload.turnId || message.sessionId === payload.previousSessionId
-              ? { ...message, sessionId: payload.sessionId }
-              : message
-          )
-        );
-        return;
-      }
-      if (payload.type === 'message-deleted') {
-        if (payloadMatchesCurrentConversation(payload)) {
-          setMessages((current) => current.filter((message) => String(message.id) !== String(payload.messageId)));
-        }
-        return;
-      }
-      if (payload.type === 'user-message') {
-        if (!payloadMatchesCurrentConversation(payload)) {
-          return;
-        }
-        if (isEditedMessageHidden(payload.sessionId, payload.message)) {
-          return;
-        }
-        setMessages((current) => {
-          const alreadyShown = current.some(
-            (message) => message.role === 'user' && message.content === payload.message.content
-          );
-          if (alreadyShown) {
-            return current;
-          }
-          return [...current, payload.message];
-        });
-        return;
-      }
-      if (payload.type === 'assistant-update') {
-        if (!payload.content?.trim()) {
-          return;
-        }
-        markRun(payload);
-        if (!payloadMatchesCurrentConversation(payload)) {
-          return;
-        }
-        if (payload.phase === 'commentary' || payload.kind === 'agent_message') {
-          maybeShowApprovalRequest(payload);
-          setMessages((current) =>
-            upsertStatusMessage(current, {
-              ...payload,
-              kind: payload.kind || 'agent_message',
-              label: briefActivityLabel(payload.content),
-              status: payload.status || 'running'
-            })
-          );
-          return;
-        }
-        maybeShowApprovalRequest(payload);
-        setMessages((current) => upsertAssistantMessage(current, payload));
-        return;
-      }
-      if (payload.type === 'status-update') {
-        if (payload.status === 'running' || payload.status === 'queued') {
-          markRun(payload);
-        }
-        if (!payloadMatchesCurrentConversation(payload)) {
-          return;
-        }
-        maybeShowApprovalRequest(payload);
-        if (payload.kind === 'turn' && payload.status === 'completed') {
-          markTurnCompleted(payload);
-          return;
-        }
-        setMessages((current) => upsertStatusMessage(current, payload));
-        return;
-      }
-      if (payload.type === 'activity-update') {
-        if (payload.status === 'running' || payload.status === 'queued') {
-          markRun(payload);
-        }
-        if (!payloadMatchesCurrentConversation(payload)) {
-          return;
-        }
-        setMessages((current) => upsertActivityMessage(current, payload));
-        return;
-      }
-      if (payload.type === 'chat-complete' || payload.type === 'chat-error' || payload.type === 'chat-aborted') {
+    if (payload.type === 'chat-started') {
+      markRun(payload);
       if (!payloadMatchesCurrentConversation(payload)) {
-          clearRun(payload);
-          return;
-        }
-        if (payload.type === 'chat-complete') {
-          markTurnCompleted(payload);
-          scheduleTurnRefresh(payload);
-          return;
-        }
-        clearRun(payload);
-        if (payload.type === 'chat-error' && payload.error) {
-          setMessages((current) =>
-            upsertStatusMessage(current, {
-              ...payload,
-              status: 'failed',
-              label: '任务失败',
-              detail: payload.error
-            })
-          );
-        } else if (payload.type === 'chat-aborted') {
-          setMessages((current) =>
-            upsertStatusMessage(finishActivityMessagesForTurn(current, payload), {
-              ...payload,
-              status: 'completed',
-              label: '已中止'
-            })
-          );
-        }
         return;
       }
-      if (payload.type === 'sync-complete' && payload.projects) {
-        setProjects(payload.projects);
-        const project = selectedProjectRef.current;
-        if (project?.id) {
-          apiFetch(`/api/projects/${encodeURIComponent(project.id)}/sessions`)
-            .then((data) => {
-              setSessionsByProject((current) => ({ ...current, [project.id]: data.sessions || [] }));
-            })
-            .catch(() => null);
-        }
+      if (!selectedSessionRef.current && payload.sessionId) {
+        setSelectedSession({ id: payload.sessionId, projectId: payload.projectId, title: '新对话' });
       }
+      return;
+    }
+    if (payload.type === 'thread-started' && payload.sessionId) {
+      const projectId = payload.projectId || selectedProjectRef.current?.id || selectedSessionRef.current?.projectId;
+      const currentSession = selectedSessionRef.current;
+      const nextSession = {
+        ...(currentSession || {}),
+        id: payload.sessionId,
+        projectId,
+        title: currentSession?.title || '新对话',
+        updatedAt: new Date().toISOString(),
+        draft: false
       };
-    };
-
-    connect();
-
-    return () => {
-      stopped = true;
-      if (reconnectTimer) {
-        window.clearTimeout(reconnectTimer);
+      markRun(payload);
+      setSelectedSession((current) => {
+        if (!current) {
+          return nextSession;
+        }
+        const shouldReplace =
+          current.id === payload.previousSessionId ||
+          current.id === payload.sessionId ||
+          current.turnId === payload.turnId ||
+          (current.draft && current.projectId === projectId);
+        return shouldReplace ? { ...current, ...nextSession } : current;
+      });
+      setSessionsByProject((current) =>
+        upsertSessionInProject(current, projectId, nextSession, payload.previousSessionId)
+      );
+      setMessages((current) =>
+        current.map((message) =>
+          message.turnId === payload.turnId || message.sessionId === payload.previousSessionId
+            ? { ...message, sessionId: payload.sessionId }
+            : message
+        )
+      );
+      return;
+    }
+    if (payload.type === 'message-deleted') {
+      if (payloadMatchesCurrentConversation(payload)) {
+        setMessages((current) => current.filter((message) => String(message.id) !== String(payload.messageId)));
       }
-      wsRef.current?.close();
-      setConnectionState('disconnected');
-    };
-  }, [authenticated]);
+      return;
+    }
+    if (payload.type === 'user-message') {
+      if (!payloadMatchesCurrentConversation(payload)) {
+        return;
+      }
+      if (isEditedMessageHidden(payload.sessionId, payload.message)) {
+        return;
+      }
+      setMessages((current) => {
+        const alreadyShown = current.some(
+          (message) => message.role === 'user' && message.content === payload.message.content
+        );
+        if (alreadyShown) {
+          return current;
+        }
+        return [...current, payload.message];
+      });
+      return;
+    }
+    if (payload.type === 'assistant-update') {
+      if (!payload.content?.trim()) {
+        return;
+      }
+      markRun(payload);
+      if (!payloadMatchesCurrentConversation(payload)) {
+        return;
+      }
+      if (payload.phase === 'commentary' || payload.kind === 'agent_message') {
+        maybeShowApprovalRequest(payload);
+        setMessages((current) =>
+          upsertStatusMessage(current, {
+            ...payload,
+            kind: payload.kind || 'agent_message',
+            label: briefActivityLabel(payload.content),
+            status: payload.status || 'running'
+          })
+        );
+        return;
+      }
+      maybeShowApprovalRequest(payload);
+      setMessages((current) => upsertAssistantMessage(current, payload));
+      return;
+    }
+    if (payload.type === 'status-update') {
+      if (payload.status === 'running' || payload.status === 'queued') {
+        markRun(payload);
+      }
+      if (!payloadMatchesCurrentConversation(payload)) {
+        return;
+      }
+      maybeShowApprovalRequest(payload);
+      if (payload.kind === 'turn' && payload.status === 'completed') {
+        markTurnCompleted(payload);
+        return;
+      }
+      setMessages((current) => upsertStatusMessage(current, payload));
+      return;
+    }
+    if (payload.type === 'activity-update') {
+      if (payload.status === 'running' || payload.status === 'queued') {
+        markRun(payload);
+      }
+      if (!payloadMatchesCurrentConversation(payload)) {
+        return;
+      }
+      setMessages((current) => upsertActivityMessage(current, payload));
+      return;
+    }
+    if (payload.type === 'chat-complete' || payload.type === 'chat-error' || payload.type === 'chat-aborted') {
+      if (!payloadMatchesCurrentConversation(payload)) {
+        clearRun(payload);
+        return;
+      }
+      if (payload.type === 'chat-complete') {
+        markTurnCompleted(payload);
+        scheduleTurnRefresh(payload);
+        return;
+      }
+      clearRun(payload);
+      if (payload.type === 'chat-error' && payload.error) {
+        setMessages((current) =>
+          upsertStatusMessage(current, {
+            ...payload,
+            status: 'failed',
+            label: '任务失败',
+            detail: payload.error
+          })
+        );
+      } else if (payload.type === 'chat-aborted') {
+        setMessages((current) =>
+          upsertStatusMessage(finishActivityMessagesForTurn(current, payload), {
+            ...payload,
+            status: 'completed',
+            label: '已中止'
+          })
+        );
+      }
+      return;
+    }
+    if (payload.type === 'sync-complete' && payload.projects) {
+      setProjects(payload.projects);
+      const project = selectedProjectRef.current;
+      if (project?.id) {
+        apiFetch(`/api/projects/${encodeURIComponent(project.id)}/sessions`)
+          .then((data) => {
+            setSessionsByProject((current) => ({ ...current, [project.id]: data.sessions || [] }));
+          })
+          .catch(() => null);
+      }
+    }
+  }, []);
+
+  const { connectionState } = useCodexSocket({ authenticated, onPayload: handleSocketPayload });
 
   async function handleSync() {
     setSyncing(true);
