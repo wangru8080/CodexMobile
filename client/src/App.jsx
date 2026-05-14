@@ -59,6 +59,7 @@ import { useProjects } from './hooks/useProjects.js';
 import { useTheme } from './hooks/useTheme.js';
 import { useViewportKeyboard } from './hooks/useViewportKeyboard.js';
 import { useVoiceInput } from './hooks/useVoiceInput.js';
+import { useChatTurns } from './hooks/useChatTurns.js';
 
 export default function App() {
   const [status, setStatus] = useState(DEFAULT_STATUS);
@@ -73,15 +74,10 @@ export default function App() {
   const [permissionMode, setPermissionMode] = useState('default');
   const [selectedModel, setSelectedModel] = useState(DEFAULT_STATUS.model);
   const [selectedReasoningEffort, setSelectedReasoningEffort] = useReasoningPreference(status.reasoningEffort);
-  const [runningById, setRunningById] = useState({});
   const [theme, setTheme] = useTheme();
   const [syncing, setSyncing] = useState(false);
   const selectedProjectRef = useRef(null);
   const selectedSessionRef = useRef(null);
-  const runningByIdRef = useRef({});
-  const lastLocalRunAtRef = useRef(0);
-  const activePollsRef = useRef(new Set());
-  const turnRefreshTimersRef = useRef(new Map());
   const editedMessageFiltersRef = useRef(new Map());
   const editedMessageReplacementsRef = useRef(new Map());
   const voiceDialogRecorderRef = useRef(null);
@@ -119,6 +115,17 @@ export default function App() {
   const voiceRealtimeSuppressAssistantAudioRef = useRef(false);
   const voiceDialogIdeaBufferRef = useRef([]);
   const voiceDialogHandoffDraftRef = useRef('');
+  const {
+    runningById,
+    setRunningById,
+    runningByIdRef,
+    lastLocalRunAtRef,
+    activePollsRef,
+    turnRefreshTimersRef,
+    markRun,
+    clearRun,
+    clearTurnRefreshTimer
+  } = useChatTurns();
   const {
     approvalRequest,
     approvalBusy,
@@ -1247,37 +1254,6 @@ export default function App() {
     setVoiceDialogMode('idle');
   }
 
-  function markRun(payload) {
-    const keys = payloadRunKeys(payload);
-    if (!keys.length) {
-      return;
-    }
-    lastLocalRunAtRef.current = Date.now();
-    setRunningById((current) => {
-      const next = { ...current };
-      for (const key of keys) {
-        next[key] = true;
-      }
-      runningByIdRef.current = next;
-      return next;
-    });
-  }
-
-  function clearRun(payload) {
-    const keys = payloadRunKeys(payload);
-    if (!keys.length) {
-      return;
-    }
-    setRunningById((current) => {
-      const next = { ...current };
-      for (const key of keys) {
-        delete next[key];
-      }
-      runningByIdRef.current = next;
-      return next;
-    });
-  }
-
   function restoreTurnSnapshot(turn) {
     const currentSession = selectedSessionRef.current;
     if (!turn?.turnId || !currentSession || !payloadMatchesCurrentConversation(turn)) {
@@ -1396,17 +1372,6 @@ export default function App() {
     return keys.includes(current.id) || keys.includes(current.turnId);
   }
 
-  function clearTurnRefreshTimer(turnId) {
-    if (!turnId) {
-      return;
-    }
-    const timer = turnRefreshTimersRef.current.get(turnId);
-    if (timer) {
-      window.clearTimeout(timer);
-      turnRefreshTimersRef.current.delete(turnId);
-    }
-  }
-
   async function refreshMessagesForPayload(payload) {
     if (!payload?.sessionId || !payloadMatchesCurrentConversation(payload)) {
       return false;
@@ -1494,16 +1459,6 @@ export default function App() {
   }, [selectedSession]);
 
   useEffect(() => () => closeVoiceDialog(), []);
-
-  useEffect(
-    () => () => {
-      for (const timer of turnRefreshTimersRef.current.values()) {
-        window.clearTimeout(timer);
-      }
-      turnRefreshTimersRef.current.clear();
-    },
-    []
-  );
 
   useEffect(() => {
     const awaiting = voiceDialogAwaitingTurnRef.current;
@@ -2274,84 +2229,6 @@ export default function App() {
       // submitCodexMessage already reflects the failure in the chat UI.
     }
     return;
-    let sessionForTurn = selectedSession;
-    if (!sessionForTurn) {
-      sessionForTurn = createDraftSession(selectedProject);
-      setSelectedSession(sessionForTurn);
-      setExpandedProjectIds((current) => ({ ...current, [selectedProject.id]: true }));
-      setSessionsByProject((current) => upsertSessionInProject(current, selectedProject.id, sessionForTurn));
-    }
-    const turnId = createClientTurnId();
-    const draftSessionId = isDraftSession(sessionForTurn) ? sessionForTurn.id : null;
-    const outgoingSessionId = draftSessionId ? null : sessionForTurn?.id || null;
-    const optimisticSessionId = draftSessionId || outgoingSessionId || turnId;
-    const selectedAttachments = attachments;
-    const initialTitle = draftSessionId && !sessionForTurn.titleLocked
-      ? titleFromFirstMessage(message || '查看附件')
-      : null;
-    const displayMessage = message || '请查看附件。';
-    setInput('');
-    setAttachments([]);
-    markRun({ turnId, sessionId: optimisticSessionId, previousSessionId: draftSessionId || outgoingSessionId });
-    setSelectedSession((current) =>
-      current?.id === sessionForTurn?.id
-        ? { ...current, turnId, ...(initialTitle ? { title: initialTitle, titleLocked: true } : {}) }
-        : current
-    );
-    if (initialTitle) {
-      setSessionsByProject((current) => ({
-        ...current,
-        [selectedProject.id]: (current[selectedProject.id] || []).map((item) =>
-          item.id === sessionForTurn.id ? { ...item, title: initialTitle, titleLocked: true } : item
-        )
-      }));
-    }
-    setMessages((current) => [
-      ...current,
-      {
-        id: `local-${Date.now()}`,
-        role: 'user',
-        content: displayMessage,
-        timestamp: new Date().toISOString(),
-        sessionId: optimisticSessionId,
-        turnId
-      }
-    ]);
-    try {
-      const result = await apiFetch('/api/chat/send', {
-        method: 'POST',
-        body: {
-          projectId: selectedProject.id,
-          sessionId: outgoingSessionId,
-          draftSessionId,
-          clientTurnId: turnId,
-          message: displayMessage,
-          model: selectedModel || status.model,
-          reasoningEffort: selectedReasoningEffort || status.reasoningEffort || DEFAULT_REASONING_EFFORT,
-          attachments: selectedAttachments
-        }
-      });
-      pollTurnUntilComplete({
-        turnId: result.turnId || turnId,
-        optimisticSessionId,
-        projectId: selectedProject.id,
-        previousSessionId: draftSessionId || outgoingSessionId
-      });
-    } catch (error) {
-      clearRun({ turnId, sessionId: optimisticSessionId, previousSessionId: draftSessionId || outgoingSessionId });
-      setAttachments(selectedAttachments);
-      setMessages((current) =>
-        upsertStatusMessage(current, {
-          sessionId: optimisticSessionId,
-          turnId,
-          kind: 'turn',
-          status: 'failed',
-          label: '发送失败',
-          detail: error.message,
-          timestamp: new Date().toISOString()
-        })
-      );
-    }
   }
 
   function restoreVoiceTextToInput(text) {
