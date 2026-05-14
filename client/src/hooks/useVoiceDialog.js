@@ -14,6 +14,7 @@ import {
 } from '../app-helpers.js';
 import { useRealtimePlayback } from './useRealtimePlayback.js';
 import { useRealtimeMicrophone } from './useRealtimeMicrophone.js';
+import { useVoiceHandoff } from './useVoiceHandoff.js';
 
 export function useVoiceDialog({
   handleVoiceSubmit,
@@ -46,25 +47,16 @@ export function useVoiceDialog({
   const voiceRealtimeAssistantTextRef = useRef('');
   const voiceRealtimeAwaitingResponseRef = useRef(false);
   const voiceRealtimeSuppressAssistantAudioRef = useRef(false);
-  const voiceDialogIdeaBufferRef = useRef([]);
-  const voiceDialogHandoffDraftRef = useRef('');
 
   const [voiceDialogOpen, setVoiceDialogOpen] = useState(false);
   const [voiceDialogState, setVoiceDialogState] = useState('idle');
   const [voiceDialogError, setVoiceDialogError] = useState('');
   const [voiceDialogTranscript, setVoiceDialogTranscript] = useState('');
   const [voiceDialogAssistantText, setVoiceDialogAssistantText] = useState('');
-  const [voiceDialogHandoffDraft, setVoiceDialogHandoffDraft] = useState('');
 
   function setVoiceDialogMode(next) {
     voiceDialogStateRef.current = next;
     setVoiceDialogState(next);
-  }
-
-  function setVoiceDialogHandoffDraftValue(next) {
-    const value = String(next || '');
-    voiceDialogHandoffDraftRef.current = value;
-    setVoiceDialogHandoffDraft(value);
   }
 
   const {
@@ -98,6 +90,32 @@ export function useVoiceDialog({
     voiceRealtimeAssistantTextRef,
     voiceRealtimeAwaitingResponseRef,
     voiceRealtimePlaybackSourcesRef,
+    voiceRealtimeSuppressAssistantAudioRef
+  });
+
+  const {
+    appendVoiceDialogIdeaTranscript,
+    cancelVoiceHandoffConfirmation,
+    clearVoiceHandoffState,
+    continueVoiceHandoffCollection,
+    requestVoiceHandoffSummary,
+    setVoiceDialogHandoffDraftValue,
+    submitVoiceHandoffToCodex,
+    voiceDialogHandoffDraft
+  } = useVoiceHandoff({
+    closeVoiceDialog,
+    selectedProject,
+    selectedProjectRef,
+    setVoiceDialogAssistantText,
+    setVoiceDialogError,
+    setVoiceDialogErrorBriefly,
+    setVoiceDialogMode,
+    stopRealtimePlayback,
+    submitCodexMessage,
+    voiceRealtimeAssistantTextRef,
+    voiceRealtimeAwaitingResponseRef,
+    voiceRealtimeBargeInStartedAtRef,
+    voiceRealtimeSocketRef,
     voiceRealtimeSuppressAssistantAudioRef
   });
 
@@ -273,48 +291,6 @@ export function useVoiceDialog({
     if (!keepPanel) {
       voiceDialogRealtimeRef.current = false;
     }
-  }
-
-  function appendVoiceDialogIdeaTranscript(transcript) {
-    const text = String(transcript || '').replace(/\s+/g, ' ').trim();
-    if (!text) {
-      return;
-    }
-    const buffer = voiceDialogIdeaBufferRef.current;
-    if (buffer[buffer.length - 1] === text) {
-      return;
-    }
-    buffer.push(text);
-    if (buffer.length > 30) {
-      buffer.splice(0, buffer.length - 30);
-    }
-  }
-
-  function requestVoiceHandoffSummary(triggerText = '') {
-    const socket = voiceRealtimeSocketRef.current;
-    const transcripts = voiceDialogIdeaBufferRef.current.filter(Boolean);
-    if (!transcripts.length) {
-      setVoiceDialogErrorBriefly('还没有可整理的语音内容');
-      return;
-    }
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-      setVoiceDialogErrorBriefly('实时语音连接不可用');
-      return;
-    }
-    stopRealtimePlayback();
-    voiceRealtimeSuppressAssistantAudioRef.current = true;
-    voiceRealtimeAwaitingResponseRef.current = false;
-    voiceRealtimeBargeInStartedAtRef.current = 0;
-    voiceRealtimeAssistantTextRef.current = '';
-    setVoiceDialogAssistantText('');
-    setVoiceDialogHandoffDraftValue('');
-    setVoiceDialogError('');
-    setVoiceDialogMode('summarizing');
-    socket.send(JSON.stringify({
-      type: 'voice.handoff.summarize',
-      transcripts,
-      trigger: triggerText
-    }));
   }
 
   function handleRealtimeVoiceEvent(payload) {
@@ -726,52 +702,13 @@ export function useVoiceDialog({
     setVoiceDialogMode('idle');
   }
 
-  function continueVoiceHandoffCollection() {
-    setVoiceDialogHandoffDraftValue('');
-    setVoiceDialogError('');
-    setVoiceDialogAssistantText('');
-    voiceRealtimeSuppressAssistantAudioRef.current = false;
-    setVoiceDialogMode('listening');
-  }
-
-  function cancelVoiceHandoffConfirmation() {
-    setVoiceDialogHandoffDraftValue('');
-    setVoiceDialogError('');
-    voiceRealtimeSuppressAssistantAudioRef.current = false;
-    setVoiceDialogMode('listening');
-  }
-
-  async function submitVoiceHandoffToCodex() {
-    const message = voiceDialogHandoffDraftRef.current.trim();
-    if (!message) {
-      return;
-    }
-    if (!selectedProjectRef.current && !selectedProject) {
-      setVoiceDialogError('请先选择项目');
-      setVoiceDialogMode('handoff');
-      return;
-    }
-    try {
-      setVoiceDialogError('');
-      setVoiceDialogMode('sending');
-      await submitCodexMessage({ message });
-      voiceDialogIdeaBufferRef.current = [];
-      setVoiceDialogHandoffDraftValue('');
-      closeVoiceDialog();
-    } catch (error) {
-      setVoiceDialogError(error.message || '发送给 Codex 失败');
-      setVoiceDialogMode('handoff');
-    }
-  }
-
   function openVoiceDialog() {
     unlockVoiceDialogAudio();
     voiceDialogOpenRef.current = true;
     voiceDialogRealtimeRef.current = Boolean(status.voiceRealtime?.configured);
     voiceDialogAutoListenRef.current = !voiceDialogRealtimeRef.current;
     voiceDialogAwaitingTurnRef.current = null;
-    voiceDialogIdeaBufferRef.current = [];
-    setVoiceDialogHandoffDraftValue('');
+    clearVoiceHandoffState();
     setVoiceDialogOpen(true);
     setVoiceDialogError('');
     setVoiceDialogTranscript('');
@@ -792,8 +729,7 @@ export function useVoiceDialog({
     voiceDialogAutoListenRef.current = false;
     voiceDialogOpenRef.current = false;
     voiceDialogAwaitingTurnRef.current = null;
-    voiceDialogIdeaBufferRef.current = [];
-    setVoiceDialogHandoffDraftValue('');
+    clearVoiceHandoffState();
     stopRealtimeVoiceDialog();
     if (voiceDialogRecorderRef.current?.state === 'recording') {
       voiceDialogRecorderRef.current.onstop = null;
