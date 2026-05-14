@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { payloadRunKeys } from '../app-helpers.js';
+import { apiFetch } from '../api.js';
+import {
+  hasAssistantMessageForTurn,
+  hasVisibleAssistantForTurn,
+  payloadRunKeys,
+  removeActivityMessagesForTurn,
+  upsertStatusMessage
+} from '../app-helpers.js';
 
-export function useChatTurns() {
+export function useChatTurns({ filterEditedMessages, payloadMatchesCurrentConversation, setMessages } = {}) {
   const [runningById, setRunningById] = useState({});
   const runningByIdRef = useRef({});
   const lastLocalRunAtRef = useRef(0);
@@ -50,6 +57,84 @@ export function useChatTurns() {
     }
   }
 
+  async function refreshMessagesForPayload(payload) {
+    if (!payload?.sessionId || !payloadMatchesCurrentConversation?.(payload)) {
+      return false;
+    }
+    try {
+      const data = await apiFetch(`/api/sessions/${encodeURIComponent(payload.sessionId)}/messages?limit=120`);
+      if (data.messages?.length && hasVisibleAssistantForTurn(data.messages, payload)) {
+        setMessages(filterEditedMessages(payload.sessionId, data.messages));
+        return true;
+      }
+    } catch {
+      return false;
+    }
+    return false;
+  }
+
+  function finalizeTurnWithoutAssistant(payload) {
+    if (!payload?.turnId) {
+      return;
+    }
+    clearTurnRefreshTimer(payload.turnId);
+    setMessages((current) =>
+      upsertStatusMessage(current, {
+        ...payload,
+        status: 'completed',
+        label: '任务已完成',
+        detail: payload.error || payload.detail || ''
+      })
+    );
+    clearRun(payload);
+  }
+
+  function markTurnCompleted(payload, detail = '结果同步中') {
+    if (!payload?.turnId) {
+      return;
+    }
+    setMessages((current) => {
+      if (hasAssistantMessageForTurn(current, payload)) {
+        return removeActivityMessagesForTurn(current, payload);
+      }
+      return upsertStatusMessage(current, {
+        ...payload,
+        kind: 'turn',
+        status: 'running',
+        label: '正在思考中',
+        detail
+      });
+    });
+  }
+
+  function scheduleTurnRefresh(payload, attempt = 0) {
+    const turnId = payload?.turnId;
+    if (!turnId || !payload?.sessionId || !payloadMatchesCurrentConversation?.(payload)) {
+      return;
+    }
+    clearTurnRefreshTimer(turnId);
+    const delays = [300, 800, 1500, 2500, 4000, 6500, 10000, 15000, 22000, 30000, 30000];
+    const delay = delays[attempt];
+    if (delay === undefined) {
+      finalizeTurnWithoutAssistant(payload);
+      return;
+    }
+
+    const timer = window.setTimeout(async () => {
+      if (!payloadMatchesCurrentConversation?.(payload)) {
+        return;
+      }
+      const loaded = await refreshMessagesForPayload(payload);
+      if (loaded) {
+        clearTurnRefreshTimer(turnId);
+        clearRun(payload);
+        return;
+      }
+      scheduleTurnRefresh(payload, attempt + 1);
+    }, delay);
+    turnRefreshTimersRef.current.set(turnId, timer);
+  }
+
   useEffect(
     () => () => {
       for (const timer of turnRefreshTimersRef.current.values()) {
@@ -69,6 +154,10 @@ export function useChatTurns() {
     turnRefreshTimersRef,
     markRun,
     clearRun,
-    clearTurnRefreshTimer
+    clearTurnRefreshTimer,
+    refreshMessagesForPayload,
+    finalizeTurnWithoutAssistant,
+    markTurnCompleted,
+    scheduleTurnRefresh
   };
 }
