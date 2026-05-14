@@ -15,13 +15,10 @@ import {
   activityStepFromPayload,
   audioLevel,
   completeStatusMessage,
-  createClientTurnId,
-  createDraftSession,
   downsampleAudio,
   finishActivityMessagesForTurn,
   floatToPcm16Base64,
   hasRunningKey,
-  hasVisibleAssistantForTurn,
   isBenignRealtimeCancelError,
   isDraftSession,
   isVoiceHandoffCommand,
@@ -31,7 +28,6 @@ import {
   realtimePayloadErrorMessage,
   selectedRunKeys,
   spokenReplyText,
-  titleFromFirstMessage,
   upsertActivityMessage,
   upsertAssistantMessage,
   upsertSessionInProject,
@@ -125,14 +121,26 @@ export default function App() {
     markTurnCompleted,
     scheduleTurnRefresh,
     pollTurnUntilComplete,
-    handleAbort
+    handleAbort,
+    submitCodexMessage
   } = useChatTurns({
+    defaultReasoningEffort: DEFAULT_REASONING_EFFORT,
     filterEditedMessages,
+    model: selectedModel || status.model,
     payloadMatchesCurrentConversation,
+    permissionMode,
+    projects,
+    reasoningEffort: selectedReasoningEffort || status.reasoningEffort,
+    selectedProject,
+    selectedProjectRef,
     selectedSessionRef,
+    setAttachments,
+    setExpandedProjectIds,
+    setInput,
     setMessages,
     setSelectedSession,
-    setSessionsByProject
+    setSessionsByProject,
+    updateEditedReplacementTurn
   });
   const {
     approvalRequest,
@@ -1834,160 +1842,6 @@ export default function App() {
     setAttachments((current) => current.filter((attachment) => attachment.id !== id));
   }
 
-  async function submitCodexMessage({
-    message,
-    attachmentsForTurn = [],
-    clearComposer = false,
-    restoreTextOnError = false,
-    userMessageId = '',
-    contextMessages = null,
-    approvalSessionId = null,
-    approvalPreviousSessionId = null,
-    approvalProjectId = null
-  }) {
-    const project =
-      (approvalProjectId && projects.find((item) => item.id === approvalProjectId)) ||
-      selectedProject ||
-      selectedProjectRef.current;
-    const selectedAttachments = Array.isArray(attachmentsForTurn) ? attachmentsForTurn : [];
-    const displayMessage = String(message || '').trim() || (selectedAttachments.length ? '请查看附件。' : '');
-    if ((!displayMessage && !selectedAttachments.length) || !project) {
-      if (restoreTextOnError && displayMessage) {
-        restoreVoiceTextToInput(displayMessage);
-      }
-      throw new Error(project ? 'message or attachments are required' : '请先选择项目');
-    }
-
-    let sessionForTurn =
-      approvalSessionId
-        ? { ...(selectedSessionRef.current || {}), id: approvalSessionId, projectId: project.id, draft: false }
-        : selectedSession;
-    if (!sessionForTurn) {
-      sessionForTurn = createDraftSession(project);
-      setSelectedSession(sessionForTurn);
-      setExpandedProjectIds((current) => ({ ...current, [project.id]: true }));
-      setSessionsByProject((current) => upsertSessionInProject(current, project.id, sessionForTurn));
-    }
-
-    const turnId = createClientTurnId();
-    const draftSessionId = approvalSessionId ? null : isDraftSession(sessionForTurn) ? sessionForTurn.id : null;
-    const outgoingSessionId = draftSessionId ? null : sessionForTurn?.id || null;
-    const optimisticSessionId = approvalSessionId || draftSessionId || outgoingSessionId || turnId;
-    const previousSessionIdForTurn = approvalPreviousSessionId || draftSessionId || outgoingSessionId;
-    const initialTitle = draftSessionId && !sessionForTurn.titleLocked
-      ? titleFromFirstMessage(displayMessage)
-      : null;
-
-    if (clearComposer) {
-      setInput('');
-      setAttachments([]);
-    }
-
-    markRun({ turnId, sessionId: optimisticSessionId, previousSessionId: previousSessionIdForTurn });
-    setSelectedSession((current) =>
-      current?.id === sessionForTurn?.id
-        ? { ...current, turnId, ...(initialTitle ? { title: initialTitle, titleLocked: true } : {}) }
-        : current
-    );
-    if (initialTitle) {
-      setSessionsByProject((current) => ({
-        ...current,
-        [project.id]: (current[project.id] || []).map((item) =>
-          item.id === sessionForTurn.id ? { ...item, title: initialTitle, titleLocked: true } : item
-        )
-      }));
-    }
-    setMessages((current) => {
-      const nextMessages = userMessageId
-        ? current.map((item) =>
-            String(item.id) === String(userMessageId)
-              ? {
-                  ...item,
-                  content: displayMessage,
-                  sessionId: optimisticSessionId,
-                  turnId,
-                  timestamp: item.timestamp || new Date().toISOString()
-                }
-              : item
-          )
-        : [
-            ...current,
-            {
-              id: `local-${Date.now()}`,
-              role: 'user',
-              content: displayMessage,
-              timestamp: new Date().toISOString(),
-              sessionId: optimisticSessionId,
-              turnId
-            }
-          ];
-      return upsertStatusMessage(nextMessages, {
-        sessionId: optimisticSessionId,
-        turnId,
-        kind: 'reasoning',
-        status: 'running',
-        label: '正在思考中',
-        timestamp: new Date().toISOString()
-      });
-    });
-    if (userMessageId) {
-      updateEditedReplacementTurn(sessionForTurn.id, userMessageId, {
-        sessionId: optimisticSessionId,
-        turnId
-      });
-    }
-
-    try {
-      const result = await apiFetch('/api/chat/send', {
-        method: 'POST',
-        body: {
-          projectId: project.id,
-          sessionId: outgoingSessionId,
-          draftSessionId,
-          clientTurnId: turnId,
-          message: displayMessage,
-          permissionMode,
-          model: selectedModel || status.model,
-          reasoningEffort: selectedReasoningEffort || status.reasoningEffort || DEFAULT_REASONING_EFFORT,
-          attachments: selectedAttachments,
-          contextMessages
-        }
-      });
-      pollTurnUntilComplete({
-        turnId: result.turnId || turnId,
-        optimisticSessionId,
-        projectId: project.id,
-        previousSessionId: previousSessionIdForTurn
-      });
-      return {
-        turnId: result.turnId || turnId,
-        optimisticSessionId,
-        projectId: project.id,
-        previousSessionId: previousSessionIdForTurn
-      };
-    } catch (error) {
-      clearRun({ turnId, sessionId: optimisticSessionId, previousSessionId: previousSessionIdForTurn });
-      if (clearComposer) {
-        setAttachments(selectedAttachments);
-      }
-      if (restoreTextOnError) {
-        restoreVoiceTextToInput(displayMessage);
-      }
-      setMessages((current) =>
-        upsertStatusMessage(current, {
-          sessionId: optimisticSessionId,
-          turnId,
-          kind: 'turn',
-          status: 'failed',
-          label: '发送失败',
-          detail: error.message,
-          timestamp: new Date().toISOString()
-        })
-      );
-      throw error;
-    }
-  }
-
   const { handleVoiceSubmit } = useVoiceInput({ submitCodexMessage });
 
   async function handleSubmit() {
@@ -2005,23 +1859,6 @@ export default function App() {
       // submitCodexMessage already reflects the failure in the chat UI.
     }
     return;
-  }
-
-  function restoreVoiceTextToInput(text) {
-    const value = String(text || '').trim();
-    if (!value) {
-      return;
-    }
-    setInput((current) => {
-      const base = String(current || '').trimEnd();
-      if (!base) {
-        return value;
-      }
-      if (base.includes(value)) {
-        return current;
-      }
-      return `${base}\n${value}`;
-    });
   }
 
 
