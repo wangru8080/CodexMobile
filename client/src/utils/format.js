@@ -51,5 +51,5 @@ export function reasoningLabel(value) {
 }
 
 export function permissionLabel(value) {
-  return PERMISSION_OPTIONS.find((option) => option.value === value)?.label || '失败时询问（默认）';
+  return PERMISSION_OPTIONS.find((option) => option.value === value)?.label || '默认权限（on-failure）';
 }

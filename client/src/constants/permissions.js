@@ -3,7 +3,7 @@ export const APPROVAL_PROMPT_PATTERN =
 export const APPROVAL_ALLOW_KEY = 'codexmobile.approvalAlwaysAllow';
 
 export const PERMISSION_OPTIONS = [
-  { value: 'default', label: '失败时询问（默认）' },
+  { value: 'default', label: '默认权限（on-failure）' },
   { value: 'bypassPermissions', label: '完全访问权限', danger: true },
   { value: 'customConfig', label: '自定义（config.toml）' }
 ];
